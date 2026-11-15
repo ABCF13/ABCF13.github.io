@@ -29,7 +29,7 @@
   .portfolio-title {
     display:flex; align-items:center; justify-content:space-between;
     padding-bottom:.25rem; line-height:1.2;
-    cursor:grab;
+    cursor:grab; user-select:none;
     border-bottom:1px solid color-mix(in srgb, var(--fg) 15%, transparent);
   }
   .portfolio-title:active { cursor:grabbing; }
@@ -154,6 +154,56 @@
     output.scrollTop = output.scrollHeight;
   }
 
+  function formatDate(value) {
+    if (!value) return 'unavailable';
+    return new Intl.DateTimeFormat('en-US', {
+      month: 'numeric',
+      day: 'numeric',
+      year: 'numeric',
+      timeZone: 'America/New_York'
+    }).format(new Date(value));
+  }
+
+  function formatDuration(start) {
+    const elapsed = Math.max(0, Date.now() - new Date(start).getTime());
+    const totalSeconds = Math.floor(elapsed / 1000);
+    const days = Math.floor(totalSeconds / 86400);
+    const hours = Math.floor((totalSeconds % 86400) / 3600);
+    const minutes = Math.floor((totalSeconds % 3600) / 60);
+    const seconds = totalSeconds % 60;
+    const time = [hours, minutes, seconds].map(value => String(value).padStart(2, '0')).join(':');
+    return days ? `${days}d ${time}` : time;
+  }
+
+  function renderTracker() {
+    const entry = document.createElement('div');
+    const duration = document.createElement('span');
+    const siteUrl = trackerConfig?.siteUrl;
+    entry.append(
+      document.createTextNode(`AliFuta Extension v${formatDate(trackerData?.lastUpdated)}\n`),
+      document.createTextNode(`${trackerConfig?.studentLine || 'Student (ENG) McMaster University.'}\n`)
+    );
+    if (siteUrl) {
+      const link = document.createElement('a');
+      link.href = siteUrl;
+      link.target = '_blank';
+      link.rel = 'noopener noreferrer';
+      link.textContent = siteUrl;
+      entry.append(link);
+    } else {
+      entry.append(document.createTextNode('site unavailable'));
+    }
+    entry.append(
+      document.createTextNode(`.\n${trackerData?.visits ?? 'unavailable'} Visits\nOnline: `),
+      duration,
+      document.createTextNode('\n\n')
+    );
+    output.append(entry);
+    const updateDuration = () => { duration.textContent = formatDuration(trackerConfig.onlineSince); };
+    updateDuration();
+    window.setInterval(updateDuration, 1000);
+  }
+
   function clearTerminal() {
     output.replaceChildren();
     output.style.height = '0px';
@@ -275,6 +325,8 @@
   let videoHelp = '';
   let welcomeText = '';
   let contentLoadError = null;
+  let trackerConfig;
+  let trackerData;
   const contentFiles = {
     about: 'content/about.txt',
     projects: 'content/projects.txt',
@@ -315,6 +367,43 @@
   const contentReady = loadSiteContent().catch(error => {
     console.error(error);
     contentLoadError = error;
+  });
+
+  async function loadTracker() {
+    const configResponse = await fetch('content/tracker.json');
+    if (!configResponse.ok) {
+      throw new Error(`Failed to load content/tracker.json: ${configResponse.status}`);
+    }
+    trackerConfig = await configResponse.json();
+    const commitRequest = fetch(
+      `https://api.github.com/repos/${trackerConfig.repository}/commits?per_page=1`,
+      { headers: { Accept: 'application/vnd.github+json' } }
+    ).then(async response => {
+      if (!response.ok) throw new Error(`GitHub commit lookup failed: ${response.status}`);
+      const commits = await response.json();
+      if (!commits[0]?.commit?.author?.date) throw new Error('GitHub returned no commit date');
+      return commits[0].commit.author.date;
+    });
+    const visitsRequest = fetch(
+      `https://api.counterapi.dev/v1/${encodeURIComponent(trackerConfig.counterNamespace)}/${encodeURIComponent(trackerConfig.counterKey)}/up`
+    ).then(async response => {
+      if (!response.ok) throw new Error(`Visit counter failed: ${response.status}`);
+      const result = await response.json();
+      if (typeof result.count !== 'number') throw new Error('Visit counter returned no count');
+      return result.count;
+    });
+    const [commitResult, visitsResult] = await Promise.allSettled([commitRequest, visitsRequest]);
+    trackerData = {
+      lastUpdated: commitResult.status === 'fulfilled' ? commitResult.value : null,
+      visits: visitsResult.status === 'fulfilled' ? visitsResult.value : null
+    };
+    if (commitResult.status === 'rejected') console.error(commitResult.reason);
+    if (visitsResult.status === 'rejected') console.error(visitsResult.reason);
+  }
+
+  const trackerReady = loadTracker().catch(error => {
+    console.error(error);
+    trackerData = { lastUpdated: null, visits: null };
   });
   const commandAliases = {
     comm: 'help',
@@ -398,8 +487,12 @@
       tab.element.style.right = 'auto';
       tab.element.style.transform = 'none';
       const move = moveEvent => {
-        tab.element.style.left = `${moveEvent.clientX - offsetX}px`;
-        tab.element.style.top = `${moveEvent.clientY - offsetY}px`;
+        const maxLeft = Math.max(0, window.innerWidth - rect.width);
+        const maxTop = Math.max(0, window.innerHeight - tab.titleElement.offsetHeight);
+        const left = Math.max(0, Math.min(maxLeft, moveEvent.clientX - offsetX));
+        const top = Math.max(0, Math.min(maxTop, moveEvent.clientY - offsetY));
+        tab.element.style.left = `${left}px`;
+        tab.element.style.top = `${top}px`;
       };
       const stop = () => {
         document.removeEventListener('pointermove', move);
@@ -664,7 +757,8 @@
     }
   });
 
-  contentReady.then(() => {
+  Promise.all([contentReady, trackerReady]).then(() => {
+    renderTracker();
     if (contentLoadError) {
       print(`content unavailable: ${contentLoadError.message}`);
       return;
