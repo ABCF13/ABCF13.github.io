@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ASCII background demo</title>
+<style>
+  :root { --bg:#0b0b0f; --fg:#e8e8ee; }
+  @media (prefers-color-scheme: light) { :root { --bg:#f4f4f6; --fg:#16161a; } }
+  html { background:var(--bg); }
+  html, body { margin:0; height:100%; color:var(--fg); }
+
+  #stage-wrap {
+    position:fixed; inset:0; z-index:-1; overflow:hidden; pointer-events:none;
+    display:flex; align-items:center; justify-content:center;
+  }
+  #stage { width:max-content; max-width:100%; }   /* as wide as the ASCII frame */
+  #bg {
+    margin:0; font:10px/10px ui-monospace, Menlo, Consolas, monospace;
+    white-space:pre; opacity:.55; user-select:none;
+  }
+  /* width:0 + min-width:100% = subtitles never widen the stage, they wrap to the video's width */
+  #subs {
+    width:0; min-width:100%; box-sizing:border-box; margin-top:14px;
+    min-height:2.8em; text-align:center; text-wrap:balance; overflow-wrap:anywhere;
+    font:600 15px/1.4 system-ui, sans-serif; color:var(--fg);
+  }
+  main { padding:2rem; max-width:40rem; }
+
+  #controls {
+    position:fixed; left:50%; bottom:20px; transform:translateX(-50%); z-index:5;
+    display:flex; align-items:center; gap:8px; padding:8px 12px; border-radius:999px;
+    background:var(--bg); border:1px solid color-mix(in srgb, var(--fg) 30%, transparent);
+    font:13px system-ui, sans-serif;
+  }
+  #controls button {
+    font:inherit; color:var(--fg); background:transparent; cursor:pointer;
+    border:1px solid color-mix(in srgb, var(--fg) 30%, transparent);
+    border-radius:999px; padding:5px 12px; min-width:3.2em;
+  }
+  #controls button:hover { background:color-mix(in srgb, var(--fg) 14%, transparent); }
+  #controls button:focus-visible { outline:2px solid var(--fg); outline-offset:2px; }
+  #now { min-width:9.5em; text-align:center; font-variant-numeric:tabular-nums; color:var(--fg); }
+</style>
+</head>
+<body>
+<div id="stage-wrap">
+  <div id="stage">
+    <pre id="bg"></pre>
+    <div id="subs"></div>
+  </div>
+</div>
+<main>
+  <h1>Hello</h1>
+  <p>Page content sits on top of the ASCII clip.</p>
+</main>
+<div id="controls">
+  <button data-cmd="prev" aria-label="Previous song">Prev</button>
+  <button data-cmd="back 10" aria-label="Back 10 seconds">-10s</button>
+  <button data-cmd="toggle" id="toggle" aria-label="Play or pause">Pause</button>
+  <button data-cmd="skip 10" aria-label="Forward 10 seconds">+10s</button>
+  <button data-cmd="next" aria-label="Next song">Next</button>
+  <span id="now"></span>
+</div>
+<script src="ascii-player.js"></script>
+<script>
+  const player = new AsciiPlayer(document.getElementById('bg'));
+  const subs = new SubtitleTrack(document.getElementById('subs'));
+  const jukebox = new Jukebox(player, subs, { dir: 'clips' });  // clips/ holds clip_AAA.txt, .subs.json, playlist.json
+
+  const nowEl = document.getElementById('now');
+  const toggleBtn = document.getElementById('toggle');
+  let lastShown = '';
+  function refreshUI(t = player.wrap(player.now())) {
+    const text = `${jukebox.id} · ${Jukebox.fmt(t)} / ${Jukebox.fmt(player.duration || 0)}`;
+    if (text !== lastShown) { nowEl.textContent = text; lastShown = text; }
+    toggleBtn.textContent = player.playing ? 'Pause' : 'Play';
+  }
+  player.onTime = t => { subs.update(t); refreshUI(t); };
+
+  // Buttons just send command strings; a terminal prompt can call jukebox.run() the same way.
+  document.getElementById('controls').addEventListener('click', async e => {
+    const btn = e.target.closest('button[data-cmd]');
+    if (!btn) return;
+    console.log(await jukebox.run(btn.dataset.cmd));
+    refreshUI();
+  });
+
+  jukebox.init().then(() => refreshUI())
+    .catch(e => { console.error(e); document.getElementById('bg').textContent = 'Error: ' + e.message; });
+</script>
+</body>
+</html>
