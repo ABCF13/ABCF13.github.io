@@ -185,9 +185,9 @@
     );
     entry.append(document.createTextNode(siteUrl || 'site unavailable'));
     entry.append(
-      document.createTextNode(`.\n${trackerData?.visits ?? 'unavailable'} Visits\nOnline: `),
+      document.createTextNode(`.\n\n${trackerData?.visits ?? 'unavailable'} Visits\nOnline: `),
       duration,
-      document.createTextNode('\n\n')
+      document.createTextNode('')
     );
     output.append(entry);
     const updateDuration = () => { duration.textContent = formatDuration(trackerConfig.onlineSince); };
