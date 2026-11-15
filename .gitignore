@@ -1,9 +1,5 @@
 source/
 
 # Local build tools and archives
-ascii_conv.c
-ascii_conv.exe
-build.py
-convert.ps1
-files.zip
+tools/
 __pycache__/

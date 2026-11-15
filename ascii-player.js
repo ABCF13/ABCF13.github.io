@@ -141,7 +141,7 @@ class Jukebox {
     return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
   }
 
-  async init() {
+  async init({ random = false, exclude = [] } = {}) {
     try {
       const res = await fetch(`${this.dir}/playlist.json`);
       if (res.ok) {
@@ -149,7 +149,14 @@ class Jukebox {
         if (Array.isArray(list) && list.length) this.playlist = list.map(String);
       }
     } catch (e) { console.warn('No playlist.json, using default list', e); }
-    await this.load(0);
+    const excluded = new Set(exclude.map(id => String(id).padStart(3, '0')));
+    const available = this.playlist
+      .map((id, index) => ({ id, index }))
+      .filter(({ id }) => !excluded.has(String(id).padStart(3, '0')));
+    const startIndex = random && available.length
+      ? available[Math.floor(Math.random() * available.length)].index
+      : 0;
+    await this.load(startIndex);
     this.player.play();
   }
 

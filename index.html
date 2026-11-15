@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Portfolio terminal</title>
 <style>
-  :root { --bg:#0b0b0f; --fg:#e8e8ee; }
+  :root { --bg:#101014; --fg:#e8e8ee; }
   @media (prefers-color-scheme: light) { :root { --bg:#f4f4f6; --fg:#16161a; } }
   html { background:var(--bg); }
   html, body { margin:0; height:100%; overflow:hidden; color:var(--fg); }
@@ -20,16 +20,31 @@
   #terminal {
     position:relative; z-index:1; box-sizing:border-box; width:min(48rem, calc(100% - 3rem));
     height:min(51rem, calc(100vh - 2rem)); margin:1rem 2rem; padding:1.25rem;
-    overflow:hidden; background:color-mix(in srgb, #000 85%, var(--bg));
+    overflow:hidden; background:color-mix(in srgb, #000 75%, var(--bg));
     border:1px solid color-mix(in srgb, var(--fg) 15%, transparent);
     box-shadow:0 .5rem 1.5rem #0005; font:15px/1.5 ui-monospace, Menlo, Consolas, monospace;
   }
   #output {
-    max-height:27em; overflow-y:auto; overflow-x:hidden;
+    max-height:18em; overflow-y:auto; overflow-x:hidden;
     white-space:pre-wrap; overflow-wrap:anywhere;
     scrollbar-width:none;
   }
   #output::-webkit-scrollbar { display:none; }
+  .ghana-flag {
+    display:block; width:max-content; margin:.25em auto; padding:.1em .6em;
+    background:#2a2a2f; text-align:center; line-height:1.2;
+  }
+  .ghana-flag span { display:block; width:8ch; text-align:center; font-weight:700; }
+  .flag-red { color:#ce1126; }
+  .flag-yellow { color:#fcd116; }
+  .flag-green { color:#006b3f; }
+  .ghana-flag .flag-star { display:inline; width:auto; color:#111; font-weight:400; }
+  .about-td { color:#238b45; }
+  .about-mcmaster { color:#7a003c; }
+  .about-nsbe-yellow { color:#fcd116; }
+  .about-nsbe-brown { color:#8b4513; }
+  .about-exoskeleton { color:#d4a017; }
+  #output .open-notice { color:#fff; font-weight:600; }
   #command-line { display:flex; align-items:baseline; }
   #prompt { flex:none; }
   #command-wrap { position:relative; flex:1; min-width:0; }
@@ -82,6 +97,8 @@
   const measure = document.getElementById('measure');
   const history = [];
   let historyIndex = 0;
+  let openPromptActive = false;
+  let projectPromptActive = false;
 
   function updateCursor() {
     measure.textContent = command.value.slice(0, command.selectionStart ?? command.value.length);
@@ -99,43 +116,188 @@
     output.scrollTop = output.scrollHeight;
   }
 
+  function clearTerminal() {
+    output.replaceChildren();
+    output.style.height = '0px';
+  }
+
+  function appendHighlightedText(container, text) {
+    const pattern = /\[\[(TD|MCMASTER|NSBE_YELLOW|NSBE_BROWN|EXOSKELETON)\]\]([\s\S]*?)\[\[\/\1\]\]/g;
+    let lastIndex = 0;
+    let match;
+    const classes = {
+      TD: 'about-td',
+      MCMASTER: 'about-mcmaster',
+      NSBE_YELLOW: 'about-nsbe-yellow',
+      NSBE_BROWN: 'about-nsbe-brown',
+      EXOSKELETON: 'about-exoskeleton'
+    };
+    while ((match = pattern.exec(text))) {
+      container.append(document.createTextNode(text.slice(lastIndex, match.index)));
+      const highlight = document.createElement('span');
+      highlight.className = classes[match[1]];
+      highlight.textContent = match[2];
+      container.append(highlight);
+      lastIndex = pattern.lastIndex;
+    }
+    container.append(document.createTextNode(text.slice(lastIndex)));
+  }
+
+  function printCommand(line, response) {
+    const entry = document.createElement('div');
+    const commandText = document.createElement('div');
+    commandText.textContent = `PS C:\\Ontario\\Hamilton> ${line}`;
+    const responseText = document.createElement('div');
+    const responseParts = response.split('[[GHANA_FLAG]]');
+    appendHighlightedText(responseText, responseParts[0]);
+    if (responseParts.length > 1) {
+      const flag = document.createElement('span');
+      flag.className = 'ghana-flag';
+      [
+        ['flag-red', '########'],
+        ['flag-yellow', '###★###'],
+        ['flag-green', '########']
+      ].forEach(([className, text]) => {
+        const row = document.createElement('span');
+        row.className = className;
+        if (text.includes('★')) {
+          const star = document.createElement('span');
+          star.className = 'flag-star';
+          star.textContent = '★';
+          row.append(document.createTextNode('###'), star, document.createTextNode('###'));
+        } else {
+          row.textContent = text;
+        }
+        flag.append(row);
+      });
+      responseText.append(flag);
+      appendHighlightedText(responseText, responseParts.slice(1).join('[[GHANA_FLAG]]'));
+    }
+    if (response.startsWith('[opened in new tab]')) responseText.className = 'open-notice';
+    entry.append(commandText, responseText);
+    output.append(entry);
+    const maxHeight = parseFloat(getComputedStyle(output).maxHeight);
+    output.style.height = `${Math.min(entry.getBoundingClientRect().height, maxHeight)}px`;
+    output.scrollTop = entry.getBoundingClientRect().top -
+      output.getBoundingClientRect().top + output.scrollTop;
+  }
+
+  function openTarget(target) {
+    const url = openLinks[target];
+    if (!url) return `unknown open target: ${target}`;
+    const newTab = window.open(url, '_blank', 'noopener,noreferrer');
+    if (!newTab) return `popup blocked: allow popups to open ${target}`;
+    newTab.blur();
+    window.focus();
+    return `[opened in new tab] ${target}`;
+  }
+
   const info = {
-    about: 'Hello.\nThis portfolio is an interactive terminal over an ASCII video background.',
-    projects: 'projects\n  ascii-player  ASCII video background with playlist controls',
-    contact: 'Contact information is not configured yet.'
+    about: 'Ali Basiru Christo Futa, born under a lucky star.\n\n[[GHANA_FLAG]]\nI\'m a Computer Engineering + Math student at [[MCMASTER]]McMaster[[/MCMASTER]], [[TD]]TD Scholar[[/TD]], [[NSBE_YELLOW]]NSBE[[/NSBE_YELLOW]] [[NSBE_BROWN]]Executive[[/NSBE_BROWN]], SWE at [[EXOSKELETON]]McMaster Exoskeleton[[/EXOSKELETON]], 6\'6" and counting.\n\nThis is my personal website where you can learn more about me, feel free to watch some of my favorite music videos on the right->',
+    projects: 'Personal Projects:\n  ascii-player\n  portfolio-site\nDesign Repositories:\n  exoskeleton',
+    contact: 'email: futaa@mcmaster.ca\ninsta: abcf.gh',
+    writing: 'Writing information is not configured yet.'
   };
   const openLinks = {
-    'ascii-player': 'https://github.com/ABCF13/portfolio-site',
+    'ascii-player': 'https://github.com/ABCF13/ascii-player',
     'portfolio-site': 'https://github.com/ABCF13/portfolio-site',
+    projects: 'https://github.com/ABCF13/?tab=repositories',
+    exoskeleton: 'https://github.com/macexo/exoskeleton-embedded',
     linkedin: 'https://www.linkedin.com/in/alifuta/',
     github: 'https://github.com/ABCF13',
     resume: 'Ali_Resume.pdf',
     cv: 'Ali_Cv.pdf'
   };
+  const commandAliases = {
+    comm: 'help',
+    commands: 'help',
+    hlep: 'help',
+    hepl: 'help',
+    abut: 'about',
+    projets: 'projects',
+    opne: 'open',
+    clsoe: 'close',
+    contcat: 'contact',
+    writng: 'writing',
+    clea: 'clear',
+    vidoe: 'video',
+    vido: 'video',
+    plaay: 'play',
+    paus: 'pause',
+    togle: 'toggle',
+    nxt: 'next',
+    prv: 'prev',
+    stauts: 'status',
+    lst: 'list',
+    skp: 'skip',
+    bak: 'back',
+    seak: 'seek',
+    gto: 'goto'
+  };
+  const commandPrefixes = {
+    help: 'help',
+    abou: 'about',
+    proj: 'projects',
+    open: 'open',
+    clos: 'close',
+    cont: 'contact',
+    writ: 'writing',
+    clea: 'clear',
+    vide: 'video',
+    play: 'play',
+    paus: 'pause',
+    togg: 'toggle',
+    next: 'next',
+    prev: 'prev',
+    stat: 'status',
+    list: 'list',
+    skip: 'skip',
+    back: 'back',
+    seek: 'seek',
+    goto: 'goto'
+  };
+  const videoHelp = 'Video commands:\n  play      Play the background\n  pause     Pause the background\n  toggle    Toggle playback\n  next      Play the next clip\n  prev      Play the previous clip\n  status    Show playback status\n  list      List available clips\n  skip      Skip seconds (default: 10)\n  back      Go back seconds (default: 10)\n  seek      Seek to seconds or m:ss\n  goto      Load a clip by id';
 
-  async function runCommand(line) {
+  function projectPrompt() {
+    return `${info.projects}\n\nwhich project would you like to open (type 'c' to cancel.)`;
+  }
+
+  function runCommand(line) {
     const [name, ...args] = line.trim().split(/\s+/);
-    switch (name.toLowerCase()) {
+    const commandName = name.toLowerCase();
+    const aliasedName = commandAliases[commandName] || commandName;
+    const normalizedName = commandPrefixes[aliasedName.slice(0, 4)] || aliasedName;
+    switch (normalizedName) {
       case '': return '';
       case 'help':
-        return 'Available commands:\n  about     Learn about me\n  projects  View projects\n  open      Open a project, profile, resume, or CV\n  contact   View contact information\n  clear     Clear the terminal\nVideo player commands:\n  play      Play the background\n  pause     Pause the background\n  toggle    Toggle playback\n  next      Play the next clip\n  prev      Play the previous clip\n  status    Show playback status\n  list      List available clips\n  skip      Skip seconds (default: 10)\n  back      Go back seconds (default: 10)\n  seek      Seek to seconds or m:ss\n  goto      Load a clip by id';
+        return 'Information Commands:\n  about     Learn about me\n  projects  View projects\n  contact   View contact information\n  writing   View writing\nSite Commands:\n  open      Open a project, profile, resume, or CV\n  clear     Clear the terminal\n  video     View video commands\n  close     Close this browser tab';
+      case 'video':
+        return videoHelp;
       case 'about':
       case 'projects':
       case 'contact':
-        return info[name.toLowerCase()];
+      case 'writing':
+        return info[normalizedName];
       case 'clear':
-        output.replaceChildren();
+        clearTerminal();
         return '';
+      case 'close':
+        window.close();
+        return 'closing tab';
       case 'open': {
         const target = (args[0] || '').toLowerCase();
-        const url = openLinks[target];
-        if (!target) return 'usage: open <project_name|linkedin|github|resume|cv>';
-        if (!url) return `unknown open target: ${target}`;
-        window.open(url, '_blank', 'noopener,noreferrer');
-        return `opening ${target}`;
+        if (!target) {
+          openPromptActive = true;
+          return 'usage: open <project_name|linkedin|github|resume|cv>\n\noptions:\nproject\nlinkedin\ngithub\nresume\ncv\npress c to cancel.';
+        }
+        if (target === 'project' || target === 'projects') {
+          projectPromptActive = true;
+          return projectPrompt();
+        }
+        return openTarget(target);
       }
       default:
-        return jukebox.run([name, ...args].join(' '));
+        return jukebox.run([normalizedName, ...args].join(' '));
     }
   }
 
@@ -145,14 +307,40 @@
     if (!line) return;
     history.push(line);
     historyIndex = history.length;
-    print(`PS C:\\Ontario\\Hamilton> ${line}`);
     command.value = '';
+    let response;
+    if (openPromptActive || projectPromptActive) {
+      const selectingProject = projectPromptActive;
+      openPromptActive = false;
+      projectPromptActive = false;
+      const entered = line.toLowerCase().split(/\s+/);
+      const target = entered[0] === 'open' ? entered[1] : entered[0];
+      if (target === 'c') {
+        response = 'open cancelled';
+      } else if (!target) {
+        response = 'usage: open <project_name>';
+      } else if (!selectingProject && (target === 'project' || target === 'projects')) {
+        projectPromptActive = true;
+        response = projectPrompt();
+      } else {
+        response = openTarget(target);
+      }
+    } else {
+      response = await runCommand(line);
+    }
+    printCommand(line, response);
     updateCursor();
-    print(await runCommand(line));
   });
 
   command.addEventListener('keydown', event => {
-    if (event.key === 'ArrowUp') {
+    if (event.ctrlKey && event.key.toLowerCase() === 'c') {
+      event.preventDefault();
+      openPromptActive = false;
+      projectPromptActive = false;
+      clearTerminal();
+      command.value = '';
+      updateCursor();
+    } else if (event.key === 'ArrowUp') {
       event.preventDefault();
       historyIndex = Math.max(0, historyIndex - 1);
       command.value = history[historyIndex] || '';
@@ -165,7 +353,7 @@
 
   print('Welcome to my portfolio.');
   print('Type "help" to see available commands.');
-  jukebox.init()
+  jukebox.init({ random: true, exclude: ['002', '004'] })
     .catch(e => { console.error(e); document.getElementById('bg').textContent = 'Error: ' + e.message; });
 </script>
 </body>
