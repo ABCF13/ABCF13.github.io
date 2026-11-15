@@ -19,7 +19,6 @@ class AsciiPlayer {
     this.startedAt = null;   // performance.now() when playing
     this.raf = 0;
     this.lastIndex = -1;
-    this.onTime = null;      // optional callback(seconds) every frame, e.g. subtitles
   }
 
   get playing() { return this.raf !== 0; }
@@ -87,7 +86,6 @@ class AsciiPlayer {
     this.offset = seconds;
     if (this.startedAt !== null) this.startedAt = performance.now();
     this.render(this.indexAt(seconds));
-    if (this.onTime) this.onTime(this.wrap(seconds));
   }
 
   /** Time folded into the clip's length (matches how frames loop). */
@@ -102,7 +100,6 @@ class AsciiPlayer {
     const tick = () => {
       const t = this.now();
       this.render(this.indexAt(t));             // frame chosen from time, never drifts
-      if (this.onTime) this.onTime(this.wrap(t));
       this.raf = requestAnimationFrame(tick);
     };
     this.raf = requestAnimationFrame(tick);
@@ -119,50 +116,18 @@ class AsciiPlayer {
 }
 
 /*
- * SubtitleTrack - shows cues from clip_AAA.subs.json in an element.
- *   const subs = new SubtitleTrack(el);
- *   player.onTime = t => subs.update(t);
- *   await subs.load('clips/clip_001.subs.json');
- */
-class SubtitleTrack {
-  constructor(el) { this.el = el; this.cues = []; this.current = -1; }
-
-  async load(url) {
-    this.cues = []; this.current = -1; this.el.textContent = '';
-    try {
-      const res = await fetch(url);
-      if (res.ok) this.cues = (await res.json()).cues || [];   // missing file = no subs
-    } catch (e) { console.warn('No subtitles:', e); }
-    return this;
-  }
-
-  update(t) {
-    let lo = 0, hi = this.cues.length - 1, idx = -1;           // last cue starting <= t
-    while (lo <= hi) {
-      const mid = (lo + hi) >> 1;
-      if (this.cues[mid].s <= t) { idx = mid; lo = mid + 1; } else hi = mid - 1;
-    }
-    if (idx !== -1 && t >= this.cues[idx].e) idx = -1;
-    if (idx === this.current) return;
-    this.current = idx;
-    this.el.textContent = idx === -1 ? '' : this.cues[idx].t;
-  }
-}
-
-/*
  * Jukebox - playlist + transport controls. Everything goes through run(),
  * which takes a command string and returns a status message, so the same
  * calls work from buttons now and from a terminal prompt later.
  *
- *   const jb = new Jukebox(player, subs, { dir: 'clips' });
+ *   const jb = new Jukebox(player, { dir: 'clips' });
  *   await jb.init();                 // reads clips/playlist.json, starts playing
  *   await jb.run('skip 10');         // also: back [n], pause, play, toggle, next, prev,
  *                                    //       seek <sec|m:ss>, goto <id>, list, status
  */
 class Jukebox {
-  constructor(player, subs, { dir = 'clips', fallback = ['001'] } = {}) {
+  constructor(player, { dir = 'clips', fallback = ['001'] } = {}) {
     this.player = player;
-    this.subs = subs;
     this.dir = dir;
     this.playlist = fallback;
     this.index = 0;
@@ -193,10 +158,7 @@ class Jukebox {
     const n = this.playlist.length;
     const idx = ((i % n) + n) % n;
     const id = this.playlist[idx];
-    await Promise.all([
-      this.player.load(`${this.dir}/clip_${id}.txt`),
-      this.subs.load(`${this.dir}/clip_${id}.subs.json`)
-    ]);
+    await this.player.load(`${this.dir}/clip_${id}.txt`);
     this.index = idx;
     this.player.seek(0);                       // also restarts the clock if playing
     return `now on ${id}`;
@@ -269,4 +231,4 @@ class Jukebox {
   }
 }
 
-if (typeof module !== 'undefined') module.exports = { AsciiPlayer, SubtitleTrack, Jukebox };
+if (typeof module !== 'undefined') module.exports = { AsciiPlayer, Jukebox };

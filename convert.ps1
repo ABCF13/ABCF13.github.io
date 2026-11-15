@@ -1,10 +1,8 @@
-# convert.ps1 - source\<video>.mp4  ->  clips\clip_<ID>.txt  (+ clips\clip_<ID>.subs.json)
+# convert.ps1 - source\<video>.mp4  ->  clips\clip_<ID>.txt
 # Usage:  .\convert.ps1 video.mp4 001
-#         .\convert.ps1 video.mp4 001 -NoSubs      (skip the transcript)
 param(
   [Parameter(Mandatory=$true)][string]$Video,
-  [Parameter(Mandatory=$true)][string]$Id,
-  [switch]$NoSubs
+  [Parameter(Mandatory=$true)][string]$Id
 )
 $ErrorActionPreference = 'Stop'
 Set-Location $PSScriptRoot
@@ -36,8 +34,3 @@ ffmpeg -y -loglevel error -i $src -vf "fps=12,scale=${W}:${H}" -f rawvideo -pix_
 if ($LASTEXITCODE -ne 0) { throw 'ffmpeg failed' }
 .\ascii_conv.exe $raw $Id $W $H "clips\clip_$Id.txt"
 Remove-Item $raw
-
-if (-not $NoSubs) {
-  $py = if (Get-Command python -ErrorAction SilentlyContinue) { 'python' } else { 'py' }
-  & $py make_subs.py $src $Id
-}
