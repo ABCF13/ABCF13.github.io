@@ -16,22 +16,31 @@
     margin:0; font:10px/10px ui-monospace, Menlo, Consolas, monospace;
     white-space:pre; opacity:.55; user-select:none;
   }
-  #portfolio-tab {
+  #window-layer { position:fixed; inset:0; z-index:2; pointer-events:none; }
+  .portfolio-window {
     display:none; position:absolute; z-index:2; right:1rem; top:50%; transform:translateY(-50%);
     box-sizing:border-box; width:min(54rem, calc(100vw - 3.5rem)); height:min(44rem, calc(100vh - 6rem));
     background:color-mix(in srgb, #000 75%, var(--bg));
     border:1px solid color-mix(in srgb, var(--fg) 15%, transparent);
     box-shadow:0 .5rem 1.5rem #0005; padding:.75rem 1.25rem 1.25rem; overflow:auto;
     white-space:pre-wrap; font:15px/1.5 ui-monospace, Menlo, Consolas, monospace;
+    pointer-events:auto;
   }
-  #portfolio-title {
+  .portfolio-title {
+    display:flex; align-items:center; justify-content:space-between;
     padding-bottom:.25rem; line-height:1.2;
+    cursor:grab;
     border-bottom:1px solid color-mix(in srgb, var(--fg) 15%, transparent);
   }
-  #portfolio-content { padding-top:.35rem; }
-  #portfolio-tab.is-opening,
-  #portfolio-tab.is-open { display:block; }
-  #portfolio-tab.is-opening { animation:terminal-load .5s ease-out both; }
+  .portfolio-title:active { cursor:grabbing; }
+  .portfolio-title button {
+    padding:0 .25rem; border:0; color:inherit; background:transparent;
+    font:inherit; line-height:1; cursor:pointer;
+  }
+  .portfolio-content { padding-top:.35rem; }
+  .portfolio-window.is-opening,
+  .portfolio-window.is-open { display:block; }
+  .portfolio-window.is-opening { animation:terminal-load .5s ease-out both; }
   @keyframes terminal-load {
     from { opacity:0; transform:translateY(-47%) scale(.98); }
     to { opacity:1; transform:translateY(-50%) scale(1); }
@@ -93,10 +102,7 @@
   <div id="stage">
     <pre id="bg"></pre>
   </div>
-  <div id="portfolio-tab" aria-label="Portfolio tab">
-    <div id="portfolio-title"></div>
-    <div id="portfolio-content"></div>
-  </div>
+  <div id="window-layer" aria-label="Open terminal windows"></div>
 </div>
 <section id="terminal" aria-label="Interactive portfolio terminal">
   <div id="output" aria-live="polite"></div>
@@ -120,19 +126,17 @@
   const command = document.getElementById('command');
   const blockCursor = document.getElementById('block-cursor');
   const measure = document.getElementById('measure');
-  const portfolioTab = document.getElementById('portfolio-tab');
-  const portfolioTitle = document.getElementById('portfolio-title');
-  const portfolioContent = document.getElementById('portfolio-content');
+  const windowLayer = document.getElementById('window-layer');
   const history = [];
   let historyIndex = 0;
   let openPromptActive = false;
   let projectPromptActive = false;
   let closeSitePromptActive = false;
   let videoOpen = true;
-  let portfolioOpenTimer = 0;
   let writingActive = false;
   let writingSelected = false;
-  let writingWasVideoOpen = false;
+  const openTabs = [];
+  let activeTab = '';
 
   function updateCursor() {
     measure.textContent = command.value.slice(0, command.selectionStart ?? command.value.length);
@@ -231,14 +235,12 @@
 
   function openTarget(target) {
     if (target === 'portfolio') {
-      if (portfolioTab.classList.contains('is-open') ||
-          portfolioTab.classList.contains('is-opening')) return 'portfolio already opened';
-      portfolioOpenTimer = setTimeout(() => {
-        portfolioOpenTimer = 0;
-        portfolioTab.classList.remove('is-opening');
-        portfolioTab.classList.add('is-open');
-      }, 180);
-      portfolioTab.classList.add('is-opening');
+      const alreadyOpen = openTabs.some(tab => tab.name === 'portfolio');
+      if (alreadyOpen) {
+        activateTab('portfolio');
+        return 'portfolio already opened';
+      }
+      addTab('portfolio', 'C:\\portfolio', '');
       return 'portfolio opened';
     }
     const url = openLinks[target];
@@ -266,23 +268,54 @@
     return 'video closed';
   }
 
-  const info = {
-    about: 'Ali Basiru Christo Futa, born under a lucky star.\n\n[[GHANA_FLAG]]\nI\'m a Computer Engineering + Math student at [[MCMASTER]]McMaster[[/MCMASTER]], [[TD]]TD Scholar[[/TD]], [[NSBE_YELLOW]]NSBE[[/NSBE_YELLOW]] [[NSBE_BROWN]]Executive[[/NSBE_BROWN]], SWE at [[EXOSKELETON]]McMaster Exoskeleton[[/EXOSKELETON]], 6\'6" and counting.\n\nThis is my personal website where you can learn more about me, feel free to watch some of my favorite music videos on the right->',
-    projects: 'Personal Projects:\n  ascii-player\n  personal_site\n  portfolio\nDesign Repositories:\n  exoskeleton',
-    contact: 'email: futaa@mcmaster.ca\ninsta: abcf.gh',
-    writing: 'Writing information is not configured yet.'
-  };
+  const info = { about: '', projects: '', contact: '', writing: '' };
   let writingFiles = [];
-  const openLinks = {
-    'ascii-player': 'https://github.com/ABCF13/ascii-player',
-    personal_site: 'https://github.com/ABCF13/portfolio-site',
-    projects: 'https://github.com/ABCF13/?tab=repositories',
-    exoskeleton: 'https://github.com/macexo/exoskeleton-embedded',
-    linkedin: 'https://www.linkedin.com/in/alifuta/',
-    github: 'https://github.com/ABCF13',
-    resume: 'Ali_Resume.pdf',
-    cv: 'Ali_Cv.pdf'
+  const openLinks = {};
+  let helpText = '';
+  let videoHelp = '';
+  let welcomeText = '';
+  let contentLoadError = null;
+  const contentFiles = {
+    about: 'content/about.txt',
+    projects: 'content/projects.txt',
+    contact: 'content/contact.txt',
+    writing: 'content/writing.txt',
+    help: 'content/help.txt',
+    videoHelp: 'content/video-help.txt',
+    welcome: 'content/welcome.txt'
   };
+
+  async function readContent(path) {
+    const response = await fetch(path);
+    if (!response.ok) throw new Error(`Failed to load ${path}: ${response.status}`);
+    return (await response.text()).replace(/\r\n/g, '\n').replace(/\n$/, '');
+  }
+
+  async function loadSiteContent() {
+    const [about, projects, contact, writing, help, video, welcome, links] = await Promise.all([
+      readContent(contentFiles.about),
+      readContent(contentFiles.projects),
+      readContent(contentFiles.contact),
+      readContent(contentFiles.writing),
+      readContent(contentFiles.help),
+      readContent(contentFiles.videoHelp),
+      readContent(contentFiles.welcome),
+      fetch('content/links.json').then(async response => {
+        if (!response.ok) throw new Error(`Failed to load content/links.json: ${response.status}`);
+        return response.json();
+      })
+    ]);
+    Object.assign(info, { about, projects, contact, writing });
+    Object.assign(openLinks, links);
+    helpText = help;
+    videoHelp = video;
+    welcomeText = welcome;
+  }
+
+  const contentReady = loadSiteContent().catch(error => {
+    console.error(error);
+    contentLoadError = error;
+  });
   const commandAliases = {
     comm: 'help',
     commands: 'help',
@@ -331,14 +364,113 @@
     seek: 'seek',
     goto: 'goto'
   };
-  const videoHelp = 'Video commands:\n  open video  Show and play the background\n  close video Hide the background\n  play        Play the background\n  pause       Pause the background\n  toggle      Toggle playback\n  next        Play the next clip\n  prev        Play the previous clip\n  status      Show playback status\n  list        List available clips\n  skip        Skip seconds (default: 10)\n  back        Go back seconds (default: 10)\n  seek        Seek to seconds or m:ss\n  goto        Load a clip by id';
-
   function projectPrompt() {
     return `${info.projects}\n\nwhich project would you like to open (type 'c' to cancel.)`;
   }
 
   function writingPrompt() {
     return `Which do you want to read\n${writingFiles.map((file, index) => `${index + 1}. ${file}`).join('\n')}`;
+  }
+
+  function activateTab(name) {
+    const index = openTabs.findIndex(tab => tab.name === name);
+    if (index < 0) return;
+    const [tab] = openTabs.splice(index, 1);
+    openTabs.push(tab);
+    activeTab = name;
+    writingActive = name === 'writing';
+    openTabs.forEach((item, itemIndex) => {
+      item.element.style.zIndex = String(itemIndex + 2);
+    });
+    tab.titleTextElement.textContent = tab.title;
+    tab.contentElement.textContent = tab.content;
+  }
+
+  function makeDraggable(tab) {
+    tab.titleElement.addEventListener('pointerdown', event => {
+      if (event.target.closest('button')) return;
+      activateTab(tab.name);
+      const rect = tab.element.getBoundingClientRect();
+      const offsetX = event.clientX - rect.left;
+      const offsetY = event.clientY - rect.top;
+      tab.element.style.left = `${rect.left}px`;
+      tab.element.style.top = `${rect.top}px`;
+      tab.element.style.right = 'auto';
+      tab.element.style.transform = 'none';
+      const move = moveEvent => {
+        tab.element.style.left = `${moveEvent.clientX - offsetX}px`;
+        tab.element.style.top = `${moveEvent.clientY - offsetY}px`;
+      };
+      const stop = () => {
+        document.removeEventListener('pointermove', move);
+        document.removeEventListener('pointerup', stop);
+      };
+      document.addEventListener('pointermove', move);
+      document.addEventListener('pointerup', stop, { once: true });
+    });
+  }
+
+  function addTab(name, title, content) {
+    const element = document.createElement('section');
+    element.className = 'portfolio-window is-opening';
+    element.setAttribute('aria-label', title);
+    const titleElement = document.createElement('div');
+    titleElement.className = 'portfolio-title';
+    const titleTextElement = document.createElement('span');
+    titleTextElement.textContent = title;
+    const closeButton = document.createElement('button');
+    closeButton.type = 'button';
+    closeButton.textContent = 'X';
+    closeButton.setAttribute('aria-label', `Close ${title}`);
+    titleElement.append(titleTextElement, closeButton);
+    const contentElement = document.createElement('div');
+    contentElement.className = 'portfolio-content';
+    contentElement.textContent = content;
+    element.append(titleElement, contentElement);
+    const offset = openTabs.length * 2;
+    element.style.right = `${1 + offset}rem`;
+    element.style.top = `calc(50% + ${offset}rem)`;
+    windowLayer.append(element);
+    const tab = { name, title, content, element, titleElement, titleTextElement, contentElement, timer: 0 };
+    openTabs.push(tab);
+    makeDraggable(tab);
+    closeButton.addEventListener('click', async event => {
+      event.stopPropagation();
+      const closedTitle = tab.title;
+      if (tab.name === 'writing') {
+        await closeWriting();
+      } else {
+        removeTab(tab.name);
+      }
+      printCommand('close', `${closedTitle} tab has been closed`);
+    });
+    activateTab(name);
+    tab.timer = setTimeout(() => {
+      tab.timer = 0;
+      element.classList.remove('is-opening');
+      element.classList.add('is-open');
+    }, 180);
+  }
+
+  function removeTab(name) {
+    const index = openTabs.findIndex(tab => tab.name === name);
+    if (index < 0) return false;
+    const [tab] = openTabs.splice(index, 1);
+    clearTimeout(tab.timer);
+    tab.element.remove();
+    if (openTabs.length === 0) {
+      activeTab = '';
+      return true;
+    }
+    activateTab(openTabs[openTabs.length - 1].name);
+    return true;
+  }
+
+  async function closeTopTab() {
+    if (!openTabs.length) return null;
+    const name = openTabs[openTabs.length - 1].name;
+    if (name === 'writing') return closeWriting();
+    return removeTab(name) ? 'portfolio closed' : null;
   }
 
   async function loadWritingFiles() {
@@ -355,17 +487,17 @@
     if (writingActive) return 'writing already opened';
     writingActive = true;
     writingSelected = false;
-    writingWasVideoOpen = videoOpen;
-    if (videoOpen) await closeVideo();
-    portfolioTitle.textContent = 'C:\\Writing\\';
-    portfolioContent.textContent = 'Loading writings...';
-    openTarget('portfolio');
+    addTab('writing', 'C:\\Writing\\', 'Loading writings...');
     try {
       await loadWritingFiles();
-      portfolioContent.textContent = writingPrompt();
+      const tab = openTabs.find(item => item.name === 'writing');
+      tab.content = writingPrompt();
+      activateTab('writing');
     } catch (error) {
       console.error(error);
-      portfolioContent.textContent = 'Unable to load writings.';
+      const tab = openTabs.find(item => item.name === 'writing');
+      tab.content = 'Unable to load writings.';
+      activateTab('writing');
     }
     return 'select a writing';
   }
@@ -373,10 +505,7 @@
   async function closeWriting() {
     writingActive = false;
     writingSelected = false;
-    portfolioTab.classList.remove('is-opening', 'is-open');
-    portfolioTitle.textContent = '';
-    portfolioContent.textContent = '';
-    if (writingWasVideoOpen) await openVideo();
+    removeTab('writing');
     return 'writing closed';
   }
 
@@ -386,20 +515,26 @@
     try {
       const response = await fetch(`writings/${file}`);
       if (!response.ok) throw new Error(`Failed to load writings/${file}: ${response.status}`);
-      portfolioTitle.textContent = `C:\\Writing\\${file}`;
-      portfolioContent.textContent = await response.text();
+      const tab = openTabs.find(item => item.name === 'writing');
+      tab.title = `C:\\Writing\\${file}`;
+      tab.content = await response.text();
+      activateTab('writing');
       writingSelected = true;
       return `reading ${file}`;
     } catch (error) {
       console.error(error);
-      portfolioTitle.textContent = `C:\\Writing\\${file}`;
-      portfolioContent.textContent = `Unable to load writings\\${file}.`;
+      const tab = openTabs.find(item => item.name === 'writing');
+      tab.title = `C:\\Writing\\${file}`;
+      tab.content = `Unable to load writings\\${file}.`;
+      activateTab('writing');
       writingSelected = true;
       return `unable to load ${file}`;
     }
   }
 
-  function runCommand(line) {
+  async function runCommand(line) {
+    await contentReady;
+    if (contentLoadError) return `content unavailable: ${contentLoadError.message}`;
     const [name, ...args] = line.trim().split(/\s+/);
     const commandName = name.toLowerCase();
     const aliasedName = commandAliases[commandName] || commandName;
@@ -407,7 +542,7 @@
     switch (normalizedName) {
       case '': return '';
       case 'help':
-        return 'Information Commands:\n  about     Learn about me\n  projects  View projects\n  contact   View contact information\n  writing   View writing\nSite Commands:\n  open      Open a project, video, profile, resume, or CV\n  clear     Clear the terminal\n  video     View video commands\n  close     Close video, portfolio, or site/tab';
+        return helpText;
       case 'video':
         return videoHelp;
       case 'about':
@@ -422,24 +557,28 @@
         clearTerminal();
         return '';
       case 'close':
-        switch ((args[0] || '').toLowerCase()) {
+        if (!args[0]) {
+          if (openTabs.length) return closeTopTab();
+          closeSitePromptActive = true;
+          return 'are you sure? (Y/N)';
+        }
+        switch (args[0].toLowerCase()) {
           case 'video':
           case 'ascii':
           case 'player':
             return closeVideo();
+          case 'writing':
+            return writingActive ? closeWriting() : 'writing already closed';
           case 'portfolio':
-            if (!portfolioTab.classList.contains('is-open') &&
-                !portfolioTab.classList.contains('is-opening')) return 'portfolio already closed';
-            clearTimeout(portfolioOpenTimer);
-            portfolioOpenTimer = 0;
-            portfolioTab.classList.remove('is-opening', 'is-open');
-            return 'portfolio closed';
+            return openTabs.some(tab => tab.name === 'portfolio')
+              ? (removeTab('portfolio') ? 'portfolio closed' : 'portfolio already closed')
+              : 'portfolio already closed';
           case 'site':
           case 'tab':
             closeSitePromptActive = true;
             return 'are you sure? (Y/N)';
           default:
-            return 'usage: close <video|portfolio|site|tab>';
+            return 'usage: close [video|writing|portfolio|site|tab]';
         }
       case 'open': {
         const target = (args[0] || '').toLowerCase();
@@ -452,6 +591,7 @@
           return projectPrompt();
         }
         if (target === 'video') return openVideo();
+        if (target === 'writing' || target === 'writings') return openWriting();
         return openTarget(target);
       }
       default:
@@ -467,12 +607,8 @@
     historyIndex = history.length;
     command.value = '';
     let response;
-    if (writingActive) {
-      if (!writingSelected && /^\d+$/.test(line)) {
-        response = await selectWriting(Number(line));
-      } else {
-        response = await closeWriting();
-      }
+    if (writingActive && !writingSelected && /^\d+$/.test(line)) {
+      response = await selectWriting(Number(line));
     } else if (closeSitePromptActive) {
       closeSitePromptActive = false;
       const answer = line.toLowerCase();
@@ -528,8 +664,13 @@
     }
   });
 
-  print('Welcome to my portfolio.');
-  print('Type "help" to see available commands.');
+  contentReady.then(() => {
+    if (contentLoadError) {
+      print(`content unavailable: ${contentLoadError.message}`);
+      return;
+    }
+    welcomeText.split('\n').forEach(print);
+  });
   jukebox.init({ random: true, exclude: ['002', '004'] })
     .catch(e => { console.error(e); document.getElementById('bg').textContent = 'Error: ' + e.message; });
 </script>

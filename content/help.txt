@@ -1,0 +1,10 @@
+Information Commands:
+  about     Learn about me
+  projects  View projects
+  contact   View contact information
+  writing   Open writings
+Site Commands:
+  open      Open a project, video, writing, profile, resume, or CV
+  clear     Clear the terminal
+  video     View video commands
+  close     Close the highest tab, video, or site/tab

@@ -1,0 +1,14 @@
+Video commands:
+  open video  Show and play the background
+  close video Hide the background
+  play        Play the background
+  pause       Pause the background
+  toggle      Toggle playback
+  next        Play the next clip
+  prev        Play the previous clip
+  status      Show playback status
+  list        List available clips
+  skip        Skip seconds (default: 10)
+  back        Go back seconds (default: 10)
+  seek        Seek to seconds or m:ss
+  goto        Load a clip by id
