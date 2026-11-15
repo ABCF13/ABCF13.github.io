@@ -183,16 +183,7 @@
       document.createTextNode(`AliFuta Extension v${formatDate(trackerData?.lastUpdated)}\n`),
       document.createTextNode(`${trackerConfig?.studentLine || 'Student (ENG) McMaster University.'}\n`)
     );
-    if (siteUrl) {
-      const link = document.createElement('a');
-      link.href = siteUrl;
-      link.target = '_blank';
-      link.rel = 'noopener noreferrer';
-      link.textContent = siteUrl;
-      entry.append(link);
-    } else {
-      entry.append(document.createTextNode('site unavailable'));
-    }
+    entry.append(document.createTextNode(siteUrl || 'site unavailable'));
     entry.append(
       document.createTextNode(`.\n${trackerData?.visits ?? 'unavailable'} Visits\nOnline: `),
       duration,
@@ -385,12 +376,16 @@
       return commits[0].commit.author.date;
     });
     const visitsRequest = fetch(
-      `https://api.counterapi.dev/v1/${encodeURIComponent(trackerConfig.counterNamespace)}/${encodeURIComponent(trackerConfig.counterKey)}/up`
+      `https://page-views-api.ratneshc.com/api/v1/track?site=${encodeURIComponent(trackerConfig.visitorSite)}&path=${encodeURIComponent(trackerConfig.visitorPath)}`
     ).then(async response => {
-      if (!response.ok) throw new Error(`Visit counter failed: ${response.status}`);
-      const result = await response.json();
-      if (typeof result.count !== 'number') throw new Error('Visit counter returned no count');
-      return result.count;
+      if (!response.ok) throw new Error(`Visit tracking failed: ${response.status}`);
+      const viewsResponse = await fetch(
+        `https://page-views-api.ratneshc.com/api/v1/views?site=${encodeURIComponent(trackerConfig.visitorSite)}&path=${encodeURIComponent(trackerConfig.visitorPath)}`
+      );
+      if (!viewsResponse.ok) throw new Error(`Visit lookup failed: ${viewsResponse.status}`);
+      const result = await viewsResponse.json();
+      if (typeof result.views !== 'number') throw new Error('Visit lookup returned no count');
+      return result.views;
     });
     const [commitResult, visitsResult] = await Promise.allSettled([commitRequest, visitsRequest]);
     trackerData = {

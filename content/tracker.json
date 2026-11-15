@@ -1,8 +1,8 @@
 {
   "repository": "ABCF13/portfolio-site",
-  "siteUrl": "https://abcf13.github.io/portfolio-site/",
+  "siteUrl": "https://abcf13.github.io/",
   "studentLine": "Student (ENG) McMaster University.",
-  "counterNamespace": "ABCF13-portfolio-site",
-  "counterKey": "visits",
+  "visitorSite": "abcf13.github.io",
+  "visitorPath": "/",
   "onlineSince": "2026-11-15T18:00:00-05:00"
 }
