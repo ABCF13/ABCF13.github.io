@@ -10,16 +10,35 @@
   html { background:var(--bg); }
   html, body { margin:0; height:100%; overflow:hidden; color:var(--fg); }
 
-  #stage-wrap { position:fixed; inset:0; z-index:-1; overflow:hidden; pointer-events:none; }
+  #stage-wrap { position:fixed; inset:0; z-index:0; overflow:hidden; pointer-events:none; }
 #stage { position:absolute; right: 7rem; top:40%; transform:translateY(-50%); width:max-content; max-width:100%; }
   #bg {
     margin:0; font:10px/10px ui-monospace, Menlo, Consolas, monospace;
     white-space:pre; opacity:.55; user-select:none;
   }
+  #portfolio-tab {
+    display:none; position:absolute; z-index:2; right:1rem; top:50%; transform:translateY(-50%);
+    box-sizing:border-box; width:min(54rem, calc(100vw - 3.5rem)); height:min(44rem, calc(100vh - 6rem));
+    background:color-mix(in srgb, #000 75%, var(--bg));
+    border:1px solid color-mix(in srgb, var(--fg) 15%, transparent);
+    box-shadow:0 .5rem 1.5rem #0005; padding:1.25rem; overflow:auto;
+    white-space:pre-wrap; font:15px/1.5 ui-monospace, Menlo, Consolas, monospace;
+  }
+  #portfolio-title {
+    padding-bottom:.5rem; border-bottom:1px solid color-mix(in srgb, var(--fg) 15%, transparent);
+  }
+  #portfolio-content { padding-top:.75rem; }
+  #portfolio-tab.is-opening,
+  #portfolio-tab.is-open { display:block; }
+  #portfolio-tab.is-opening { animation:terminal-load .5s ease-out both; }
+  @keyframes terminal-load {
+    from { opacity:0; transform:translateY(-47%) scale(.98); }
+    to { opacity:1; transform:translateY(-50%) scale(1); }
+  }
 
   #terminal {
     position:relative; z-index:1; box-sizing:border-box; width:min(48rem, calc(100% - 3rem));
-    height:min(51rem, calc(100vh - 2rem)); margin:1rem 2rem; padding:1.25rem;
+    height:min(51rem, 60vh); margin:1rem 2rem; padding:1.25rem;
     overflow:hidden; background:color-mix(in srgb, #000 75%, var(--bg));
     border:1px solid color-mix(in srgb, var(--fg) 15%, transparent);
     box-shadow:0 .5rem 1.5rem #0005; font:15px/1.5 ui-monospace, Menlo, Consolas, monospace;
@@ -32,7 +51,7 @@
   #output::-webkit-scrollbar { display:none; }
   .ghana-flag {
     display:block; width:max-content; margin:.25em auto; padding:.1em .6em;
-    background:#2a2a2f; text-align:center; line-height:1.2;
+    background:#9191ff; text-align:center; line-height:1.2;
   }
   .ghana-flag span { display:block; width:8ch; text-align:center; font-weight:700; }
   .flag-red { color:#ce1126; }
@@ -63,7 +82,7 @@
     position:absolute; visibility:hidden; white-space:pre; font:inherit;
   }
   @media (max-width: 600px) {
-    #terminal { width:calc(100% - 2rem); height:calc(100vh - 2rem); margin:1rem; padding:.9rem; }
+    #terminal { width:calc(100% - 2rem); height:60vh; margin:1rem; padding:.9rem; }
     #stage { right:0; }
   }
 </style>
@@ -72,6 +91,10 @@
 <div id="stage-wrap">
   <div id="stage">
     <pre id="bg"></pre>
+  </div>
+  <div id="portfolio-tab" aria-label="Portfolio tab">
+    <div id="portfolio-title"></div>
+    <div id="portfolio-content"></div>
   </div>
 </div>
 <section id="terminal" aria-label="Interactive portfolio terminal">
@@ -88,17 +111,27 @@
 </section>
 <script src="ascii-player.js"></script>
 <script>
-  const player = new AsciiPlayer(document.getElementById('bg'));
+  const bg = document.getElementById('bg');
+  const player = new AsciiPlayer(bg);
   const jukebox = new Jukebox(player, { dir: 'clips' });  // clips/ holds clip_AAA.txt and playlist.json
 
   const output = document.getElementById('output');
   const command = document.getElementById('command');
   const blockCursor = document.getElementById('block-cursor');
   const measure = document.getElementById('measure');
+  const portfolioTab = document.getElementById('portfolio-tab');
+  const portfolioTitle = document.getElementById('portfolio-title');
+  const portfolioContent = document.getElementById('portfolio-content');
   const history = [];
   let historyIndex = 0;
   let openPromptActive = false;
   let projectPromptActive = false;
+  let closeSitePromptActive = false;
+  let videoOpen = true;
+  let portfolioOpenTimer = 0;
+  let writingActive = false;
+  let writingSelected = false;
+  let writingWasVideoOpen = false;
 
   function updateCursor() {
     measure.textContent = command.value.slice(0, command.selectionStart ?? command.value.length);
@@ -121,6 +154,19 @@
     output.style.height = '0px';
   }
 
+  function appendBoldCommands(container, text) {
+    const parts = text.split(/\b(open|close)\b/gi);
+    parts.forEach(part => {
+      if (/^(open|close)$/i.test(part)) {
+        const bold = document.createElement('strong');
+        bold.textContent = part;
+        container.append(bold);
+      } else {
+        container.append(document.createTextNode(part));
+      }
+    });
+  }
+
   function appendHighlightedText(container, text) {
     const pattern = /\[\[(TD|MCMASTER|NSBE_YELLOW|NSBE_BROWN|EXOSKELETON)\]\]([\s\S]*?)\[\[\/\1\]\]/g;
     let lastIndex = 0;
@@ -133,20 +179,20 @@
       EXOSKELETON: 'about-exoskeleton'
     };
     while ((match = pattern.exec(text))) {
-      container.append(document.createTextNode(text.slice(lastIndex, match.index)));
+      appendBoldCommands(container, text.slice(lastIndex, match.index));
       const highlight = document.createElement('span');
       highlight.className = classes[match[1]];
-      highlight.textContent = match[2];
+      appendBoldCommands(highlight, match[2]);
       container.append(highlight);
       lastIndex = pattern.lastIndex;
     }
-    container.append(document.createTextNode(text.slice(lastIndex)));
+    appendBoldCommands(container, text.slice(lastIndex));
   }
 
   function printCommand(line, response) {
     const entry = document.createElement('div');
     const commandText = document.createElement('div');
-    commandText.textContent = `PS C:\\Ontario\\Hamilton> ${line}`;
+    appendBoldCommands(commandText, `PS C:\\Ontario\\Hamilton> ${line}`);
     const responseText = document.createElement('div');
     const responseParts = response.split('[[GHANA_FLAG]]');
     appendHighlightedText(responseText, responseParts[0]);
@@ -183,6 +229,17 @@
   }
 
   function openTarget(target) {
+    if (target === 'portfolio') {
+      if (portfolioTab.classList.contains('is-open') ||
+          portfolioTab.classList.contains('is-opening')) return 'portfolio already opened';
+      portfolioOpenTimer = setTimeout(() => {
+        portfolioOpenTimer = 0;
+        portfolioTab.classList.remove('is-opening');
+        portfolioTab.classList.add('is-open');
+      }, 180);
+      portfolioTab.classList.add('is-opening');
+      return 'portfolio opened';
+    }
     const url = openLinks[target];
     if (!url) return `unknown open target: ${target}`;
     const newTab = window.open(url, '_blank', 'noopener,noreferrer');
@@ -192,15 +249,32 @@
     return `[opened in new tab] ${target}`;
   }
 
+  async function openVideo() {
+    if (videoOpen) return 'video already opened';
+    videoOpen = true;
+    bg.hidden = false;
+    await jukebox.run('play');
+    return 'video opened';
+  }
+
+  async function closeVideo() {
+    if (!videoOpen) return 'video already closed';
+    videoOpen = false;
+    await jukebox.run('pause');
+    bg.hidden = true;
+    return 'video closed';
+  }
+
   const info = {
     about: 'Ali Basiru Christo Futa, born under a lucky star.\n\n[[GHANA_FLAG]]\nI\'m a Computer Engineering + Math student at [[MCMASTER]]McMaster[[/MCMASTER]], [[TD]]TD Scholar[[/TD]], [[NSBE_YELLOW]]NSBE[[/NSBE_YELLOW]] [[NSBE_BROWN]]Executive[[/NSBE_BROWN]], SWE at [[EXOSKELETON]]McMaster Exoskeleton[[/EXOSKELETON]], 6\'6" and counting.\n\nThis is my personal website where you can learn more about me, feel free to watch some of my favorite music videos on the right->',
-    projects: 'Personal Projects:\n  ascii-player\n  portfolio-site\nDesign Repositories:\n  exoskeleton',
+    projects: 'Personal Projects:\n  ascii-player\n  personal_site\n  portfolio\nDesign Repositories:\n  exoskeleton',
     contact: 'email: futaa@mcmaster.ca\ninsta: abcf.gh',
     writing: 'Writing information is not configured yet.'
   };
+  let writingFiles = [];
   const openLinks = {
     'ascii-player': 'https://github.com/ABCF13/ascii-player',
-    'portfolio-site': 'https://github.com/ABCF13/portfolio-site',
+    personal_site: 'https://github.com/ABCF13/portfolio-site',
     projects: 'https://github.com/ABCF13/?tab=repositories',
     exoskeleton: 'https://github.com/macexo/exoskeleton-embedded',
     linkedin: 'https://www.linkedin.com/in/alifuta/',
@@ -256,10 +330,72 @@
     seek: 'seek',
     goto: 'goto'
   };
-  const videoHelp = 'Video commands:\n  play      Play the background\n  pause     Pause the background\n  toggle    Toggle playback\n  next      Play the next clip\n  prev      Play the previous clip\n  status    Show playback status\n  list      List available clips\n  skip      Skip seconds (default: 10)\n  back      Go back seconds (default: 10)\n  seek      Seek to seconds or m:ss\n  goto      Load a clip by id';
+  const videoHelp = 'Video commands:\n  open video  Show and play the background\n  close video Hide the background\n  play        Play the background\n  pause       Pause the background\n  toggle      Toggle playback\n  next        Play the next clip\n  prev        Play the previous clip\n  status      Show playback status\n  list        List available clips\n  skip        Skip seconds (default: 10)\n  back        Go back seconds (default: 10)\n  seek        Seek to seconds or m:ss\n  goto        Load a clip by id';
 
   function projectPrompt() {
     return `${info.projects}\n\nwhich project would you like to open (type 'c' to cancel.)`;
+  }
+
+  function writingPrompt() {
+    return `Which do you want to read\n${writingFiles.map((file, index) => `${index + 1}. writings\\${file}`).join('\n')}\n...\nn`;
+  }
+
+  async function loadWritingFiles() {
+    const response = await fetch('writings/index.json');
+    if (!response.ok) throw new Error(`Failed to load writings/index.json: ${response.status}`);
+    const files = await response.json();
+    if (!Array.isArray(files) || files.some(file => typeof file !== 'string' || !file.endsWith('.txt'))) {
+      throw new Error('Invalid writings index');
+    }
+    writingFiles = files;
+  }
+
+  async function openWriting() {
+    if (writingActive) return 'writing already opened';
+    writingActive = true;
+    writingSelected = false;
+    writingWasVideoOpen = videoOpen;
+    if (videoOpen) await closeVideo();
+    portfolioTitle.textContent = 'C:\\Writing\\';
+    portfolioContent.textContent = 'Loading writings...';
+    openTarget('portfolio');
+    try {
+      await loadWritingFiles();
+      portfolioContent.textContent = writingPrompt();
+    } catch (error) {
+      console.error(error);
+      portfolioContent.textContent = 'Unable to load writings.';
+    }
+    return 'select a writing';
+  }
+
+  async function closeWriting() {
+    writingActive = false;
+    writingSelected = false;
+    portfolioTab.classList.remove('is-opening', 'is-open');
+    portfolioTitle.textContent = '';
+    portfolioContent.textContent = '';
+    if (writingWasVideoOpen) await openVideo();
+    return 'writing closed';
+  }
+
+  async function selectWriting(number) {
+    const file = writingFiles[number - 1];
+    if (!file) return closeWriting();
+    try {
+      const response = await fetch(`writings/${file}`);
+      if (!response.ok) throw new Error(`Failed to load writings/${file}: ${response.status}`);
+      portfolioTitle.textContent = `C:\\Writing\\${file}`;
+      portfolioContent.textContent = await response.text();
+      writingSelected = true;
+      return `reading ${file}`;
+    } catch (error) {
+      console.error(error);
+      portfolioTitle.textContent = `C:\\Writing\\${file}`;
+      portfolioContent.textContent = `Unable to load writings\\${file}.`;
+      writingSelected = true;
+      return `unable to load ${file}`;
+    }
   }
 
   function runCommand(line) {
@@ -270,30 +406,51 @@
     switch (normalizedName) {
       case '': return '';
       case 'help':
-        return 'Information Commands:\n  about     Learn about me\n  projects  View projects\n  contact   View contact information\n  writing   View writing\nSite Commands:\n  open      Open a project, profile, resume, or CV\n  clear     Clear the terminal\n  video     View video commands\n  close     Close this browser tab';
+        return 'Information Commands:\n  about     Learn about me\n  projects  View projects\n  contact   View contact information\n  writing   View writing\nSite Commands:\n  open      Open a project, video, profile, resume, or CV\n  clear     Clear the terminal\n  video     View video commands\n  close     Close video, portfolio, or site/tab';
       case 'video':
         return videoHelp;
       case 'about':
       case 'projects':
       case 'contact':
-      case 'writing':
         return info[normalizedName];
+      case 'writing':
+        return openWriting();
+      case 'portfolio':
+        return openTarget('portfolio');
       case 'clear':
         clearTerminal();
         return '';
       case 'close':
-        window.close();
-        return 'closing tab';
+        switch ((args[0] || '').toLowerCase()) {
+          case 'video':
+          case 'ascii':
+          case 'player':
+            return closeVideo();
+          case 'portfolio':
+            if (!portfolioTab.classList.contains('is-open') &&
+                !portfolioTab.classList.contains('is-opening')) return 'portfolio already closed';
+            clearTimeout(portfolioOpenTimer);
+            portfolioOpenTimer = 0;
+            portfolioTab.classList.remove('is-opening', 'is-open');
+            return 'portfolio closed';
+          case 'site':
+          case 'tab':
+            closeSitePromptActive = true;
+            return 'are you sure? (Y/N)';
+          default:
+            return 'usage: close <video|portfolio|site|tab>';
+        }
       case 'open': {
         const target = (args[0] || '').toLowerCase();
         if (!target) {
           openPromptActive = true;
-          return 'usage: open <project_name|linkedin|github|resume|cv>\n\noptions:\nproject\nlinkedin\ngithub\nresume\ncv\npress c to cancel.';
+          return 'usage: open <project_name|video|linkedin|github|resume|cv>\n\noptions:\nproject\nvideo\nlinkedin\ngithub\nresume\ncv\npress c to cancel.';
         }
         if (target === 'project' || target === 'projects') {
           projectPromptActive = true;
           return projectPrompt();
         }
+        if (target === 'video') return openVideo();
         return openTarget(target);
       }
       default:
@@ -309,7 +466,25 @@
     historyIndex = history.length;
     command.value = '';
     let response;
-    if (openPromptActive || projectPromptActive) {
+    if (writingActive) {
+      if (!writingSelected && /^\d+$/.test(line)) {
+        response = await selectWriting(Number(line));
+      } else {
+        response = await closeWriting();
+      }
+    } else if (closeSitePromptActive) {
+      closeSitePromptActive = false;
+      const answer = line.toLowerCase();
+      if (answer === 'y' || answer === 'yes') {
+        window.close();
+        response = 'closing site';
+      } else if (answer === 'n' || answer === 'no') {
+        response = 'close cancelled';
+      } else {
+        closeSitePromptActive = true;
+        response = 'are you sure? (Y/N)';
+      }
+    } else if (openPromptActive || projectPromptActive) {
       const selectingProject = projectPromptActive;
       openPromptActive = false;
       projectPromptActive = false;
@@ -337,6 +512,7 @@
       event.preventDefault();
       openPromptActive = false;
       projectPromptActive = false;
+      closeSitePromptActive = false;
       clearTerminal();
       command.value = '';
       updateCursor();
