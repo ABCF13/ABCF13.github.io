@@ -4,3 +4,5 @@ Personal Projects:
   portfolio
 Design Repositories:
   exoskeleton
+
+Type 'open <project_name>' to open its repository

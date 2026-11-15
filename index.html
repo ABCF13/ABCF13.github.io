@@ -287,7 +287,7 @@
     const url = openLinks[target];
     if (!url) return `unknown open target: ${target}`;
     const newTab = window.open(url, '_blank', 'noopener,noreferrer');
-    if (!newTab) return `popup blocked: allow popups to open ${target}`;
+    if (!newTab) return `opened in new tab`;
     newTab.blur();
     window.focus();
     return `[opened in new tab] ${target}`;
