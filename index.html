@@ -290,6 +290,7 @@
     if (!newTab) return `opened in new tab`;
     newTab.blur();
     window.focus();
+    command.focus();
     return `[opened in new tab] ${target}`;
   }
 
