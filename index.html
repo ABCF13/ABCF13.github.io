@@ -25,7 +25,7 @@
     box-shadow:0 .5rem 1.5rem #0005; font:15px/1.5 ui-monospace, Menlo, Consolas, monospace;
   }
   #output {
-    max-height:60%; overflow-y:auto; overflow-x:hidden;
+    max-height:27em; overflow-y:auto; overflow-x:hidden;
     white-space:pre-wrap; overflow-wrap:anywhere;
     scrollbar-width:none;
   }
@@ -104,9 +104,13 @@
     projects: 'projects\n  ascii-player  ASCII video background with playlist controls',
     contact: 'Contact information is not configured yet.'
   };
-  const projectLinks = {
+  const openLinks = {
     'ascii-player': 'https://github.com/ABCF13/portfolio-site',
-    'portfolio-site': 'https://github.com/ABCF13/portfolio-site'
+    'portfolio-site': 'https://github.com/ABCF13/portfolio-site',
+    linkedin: 'https://www.linkedin.com/in/alifuta/',
+    github: 'https://github.com/ABCF13',
+    resume: 'Ali_Resume.pdf',
+    cv: 'Ali_Cv.pdf'
   };
 
   async function runCommand(line) {
@@ -114,7 +118,7 @@
     switch (name.toLowerCase()) {
       case '': return '';
       case 'help':
-        return 'Available commands:\n  about     Learn about me\n  projects  View projects\n  open      Open a project GitHub page\n  contact   View contact information\n  clear     Clear the terminal\nVideo player commands:\n  play      Play the background\n  pause     Pause the background\n  toggle    Toggle playback\n  next      Play the next clip\n  prev      Play the previous clip\n  status    Show playback status\n  list      List available clips\n  skip      Skip seconds (default: 10)\n  back      Go back seconds (default: 10)\n  seek      Seek to seconds or m:ss\n  goto      Load a clip by id';
+        return 'Available commands:\n  about     Learn about me\n  projects  View projects\n  open      Open a project, profile, resume, or CV\n  contact   View contact information\n  clear     Clear the terminal\nVideo player commands:\n  play      Play the background\n  pause     Pause the background\n  toggle    Toggle playback\n  next      Play the next clip\n  prev      Play the previous clip\n  status    Show playback status\n  list      List available clips\n  skip      Skip seconds (default: 10)\n  back      Go back seconds (default: 10)\n  seek      Seek to seconds or m:ss\n  goto      Load a clip by id';
       case 'about':
       case 'projects':
       case 'contact':
@@ -123,12 +127,12 @@
         output.replaceChildren();
         return '';
       case 'open': {
-        const project = (args[0] || '').toLowerCase();
-        const url = projectLinks[project];
-        if (!project) return 'usage: open <project_name>';
-        if (!url) return `unknown project: ${project}`;
+        const target = (args[0] || '').toLowerCase();
+        const url = openLinks[target];
+        if (!target) return 'usage: open <project_name|linkedin|github|resume|cv>';
+        if (!url) return `unknown open target: ${target}`;
         window.open(url, '_blank', 'noopener,noreferrer');
-        return `opening ${project} on GitHub`;
+        return `opening ${target}`;
       }
       default:
         return jukebox.run([name, ...args].join(' '));
