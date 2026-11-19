@@ -16,7 +16,8 @@
     margin:0; font:10px/10px ui-monospace, Menlo, Consolas, monospace;
     white-space:pre; opacity:.55; user-select:none;
   }
-  #window-layer { position:fixed; inset:0; z-index:2; pointer-events:none; }
+  #window-layer { position:fixed; inset:0; z-index:0; pointer-events:none; }
+  #window-layer.is-dragging { z-index:2; }
   .portfolio-window {
     display:none; position:absolute; z-index:2; right:1rem; top:50%; transform:translateY(-50%);
     box-sizing:border-box; width:min(54rem, calc(100vw - 3.5rem)); height:min(44rem, calc(100vh - 6rem));
@@ -73,6 +74,19 @@
   .about-nsbe-yellow { color:#fcd116; }
   .about-nsbe-brown { color:#8b4513; }
   .about-exoskeleton { color:#d4a017; }
+  .portfolio-user { color:#00d75f; }
+  .portfolio-host { color:#00afff; }
+  .portfolio-name { color:#d787ff; }
+  .portfolio-path { color:#ffff00; }
+  .portfolio-prompt { color:#ff5f5f; }
+  .portfolio-entry-number { color:#00afff; }
+  .portfolio-link { color:#5fd7ff; text-decoration:underline; }
+  .portfolio-option {
+    display:block; width:100%; padding:0; border:0; color:inherit;
+    background:transparent; font:inherit; line-height:inherit; text-align:left;
+    appearance:none; outline:none;
+    cursor:inherit;
+  }
   #output .open-notice { color:#fff; font-weight:600; }
   #command-line { display:flex; align-items:baseline; }
   #prompt { flex:none; }
@@ -94,6 +108,21 @@
   @media (max-width: 600px) {
     #terminal { width:calc(100% - 2rem); height:60vh; margin:1rem; padding:.9rem; }
     #stage { right:0; }
+    .portfolio-window { width:calc(100vw - 2rem); height:calc(100vh - 4rem); right:1rem; padding:.75rem 1rem 1rem; font-size:13px; }
+  }
+  @media (max-width: 900px) and (orientation: portrait),
+         (max-aspect-ratio: 6 / 5) {
+    #terminal {
+      width:min(48rem, calc(100% - 2rem), 72vh);
+      height:min(51rem, 64vh);
+      margin:1rem auto;
+    }
+    .portfolio-window {
+      width:min(54rem, calc(100vw - 2rem), 72vh);
+      height:min(44rem, calc(100vh - 4rem), 72vh);
+      right:1rem;
+    }
+    #stage { right:1rem; }
   }
 </style>
 </head>
@@ -102,8 +131,8 @@
   <div id="stage">
     <pre id="bg"></pre>
   </div>
-  <div id="window-layer" aria-label="Open terminal windows"></div>
 </div>
+<div id="window-layer" aria-label="Open terminal windows"></div>
 <section id="terminal" aria-label="Interactive portfolio terminal">
   <div id="output" aria-live="polite"></div>
   <form id="command-line">
@@ -133,10 +162,10 @@
   let projectPromptActive = false;
   let closeSitePromptActive = false;
   let videoOpen = true;
-  let writingActive = false;
-  let writingSelected = false;
   const openTabs = [];
   let activeTab = '';
+
+  let portfolioCategories = [];
 
   function updateCursor() {
     measure.textContent = command.value.slice(0, command.selectionStart ?? command.value.length);
@@ -281,7 +310,10 @@
         activateTab('portfolio');
         return 'portfolio already opened';
       }
-      addTab('portfolio', 'C:\\portfolio', '');
+      addTab('portfolio', 'C:\\Portfolio', '', {
+        kind: 'portfolio-menu',
+        renderContent: tab => renderPortfolioMenu(tab)
+      });
       return 'portfolio opened';
     }
     const url = openLinks[target];
@@ -326,7 +358,8 @@
     writing: 'content/writing.txt',
     help: 'content/help.txt',
     videoHelp: 'content/video-help.txt',
-    welcome: 'content/welcome.txt'
+    welcome: 'content/welcome.txt',
+    portfolio: 'content/portfolio.json'
   };
 
   async function readContent(path) {
@@ -335,8 +368,14 @@
     return (await response.text()).replace(/\r\n/g, '\n').replace(/\n$/, '');
   }
 
+  async function readJson(path) {
+    const response = await fetch(path);
+    if (!response.ok) throw new Error(`Failed to load ${path}: ${response.status}`);
+    return response.json();
+  }
+
   async function loadSiteContent() {
-    const [about, projects, contact, writing, help, video, welcome, links] = await Promise.all([
+    const [about, projects, contact, writing, help, video, welcome, links, portfolio] = await Promise.all([
       readContent(contentFiles.about),
       readContent(contentFiles.projects),
       readContent(contentFiles.contact),
@@ -344,16 +383,27 @@
       readContent(contentFiles.help),
       readContent(contentFiles.videoHelp),
       readContent(contentFiles.welcome),
-      fetch('content/links.json').then(async response => {
-        if (!response.ok) throw new Error(`Failed to load content/links.json: ${response.status}`);
-        return response.json();
-      })
+      readJson('content/links.json'),
+      readJson(contentFiles.portfolio)
     ]);
     Object.assign(info, { about, projects, contact, writing });
     Object.assign(openLinks, links);
     helpText = help;
     videoHelp = video;
     welcomeText = welcome;
+    if (!Array.isArray(portfolio.categories)) throw new Error('Invalid portfolio index');
+    portfolioCategories = await Promise.all(portfolio.categories.map(async category => {
+      if (!category.name || !category.file) throw new Error('Invalid portfolio category');
+      const page = await readJson(`content/portfolio/${category.file}`);
+      if (!Array.isArray(page.entries)) throw new Error(`Invalid portfolio page: ${category.file}`);
+      const entries = page.entries.map(entry => {
+        if (!entry.title || typeof entry.url !== 'string') {
+          throw new Error(`Invalid portfolio entry in ${category.file}`);
+        }
+        return { title: entry.title, url: entry.url };
+      });
+      return { name: page.title || category.name, entries };
+    }));
   }
 
   const contentReady = loadSiteContent().catch(error => {
@@ -453,8 +503,115 @@
     return `${info.projects}\n\nwhich project would you like to open (type 'c' to cancel.)`;
   }
 
-  function writingPrompt() {
-    return `Which do you want to read\n${writingFiles.map((file, index) => `${index + 1}. ${file}`).join('\n')}`;
+  function renderWritingMenu(tab) {
+    tab.contentElement.replaceChildren();
+    tab.contentElement.append(document.createTextNode('Which do you want to read\n'));
+    writingFiles.forEach((file, index) => {
+      const option = document.createElement('button');
+      option.type = 'button';
+      option.className = 'portfolio-option';
+      option.textContent = `${index + 1}. ${file}`;
+      option.addEventListener('click', () => selectWriting(index + 1));
+      tab.contentElement.append(option);
+    });
+  }
+
+  function appendPortfolioPrompt(container) {
+    const line = document.createElement('div');
+    const user = document.createElement('span');
+    user.className = 'portfolio-user';
+    user.textContent = 'futaa';
+    const host = document.createElement('span');
+    host.className = 'portfolio-host';
+    host.textContent = '@MACU';
+    const name = document.createElement('span');
+    name.className = 'portfolio-name';
+    name.textContent = ' ABCF13';
+    const path = document.createElement('span');
+    path.className = 'portfolio-path';
+    path.textContent = ' ~';
+    const prompt = document.createElement('span');
+    prompt.className = 'portfolio-prompt';
+    prompt.textContent = '\n$ history';
+    line.append(user, host, name, path, prompt);
+    container.append(line);
+  }
+
+  function renderPortfolioMenu(tab) {
+    tab.contentElement.replaceChildren();
+    appendPortfolioPrompt(tab.contentElement);
+    portfolioCategories.forEach((category, index) => {
+      const option = document.createElement('button');
+      option.type = 'button';
+      option.className = 'portfolio-option';
+      option.textContent = `${String(index + 1).padStart(6, ' ')} ${category.name}`;
+      option.addEventListener('click', () => selectPortfolio(index + 1));
+      tab.contentElement.append(option);
+    });
+  }
+
+  function renderPortfolioCategory(tab, category) {
+    tab.contentElement.replaceChildren();
+    appendPortfolioPrompt(tab.contentElement);
+    if (!category.entries.length) {
+      tab.contentElement.append(document.createTextNode('\nNo items yet.'));
+      return;
+    }
+    category.entries.forEach((entry, index) => {
+      const option = document.createElement('button');
+      option.type = 'button';
+      option.className = 'portfolio-option';
+      const number = document.createElement('span');
+      number.className = 'portfolio-entry-number';
+      number.textContent = `${String(index + 1).padStart(6, ' ')}. `;
+      const title = document.createElement('span');
+      title.className = 'portfolio-link';
+      title.textContent = entry.title;
+      option.addEventListener('click', () => openPortfolioLink(entry));
+      option.append(number, title);
+      tab.contentElement.append(option);
+    });
+  }
+
+  function openPortfolioLink(entry) {
+    const newTab = window.open(entry.url, '_blank', 'noopener,noreferrer');
+    if (!newTab) return `unable to open ${entry.title}`;
+    newTab.blur();
+    window.focus();
+    command.focus();
+    return `[opened in new tab] ${entry.title}`;
+  }
+
+  function selectPortfolio(number) {
+    const tab = openTabs.find(item => item.kind === 'portfolio-menu');
+    if (!tab) return 'portfolio is not open';
+    const category = portfolioCategories[number - 1];
+    if (!category) return 'no such portfolio category';
+    const childName = `portfolio:${category.name}`;
+    const existing = openTabs.find(item => item.name === childName);
+    if (existing) {
+      activateTab(childName);
+      return `${category.name} already opened`;
+    }
+    addTab(childName, `C:\\Portfolio\\${category.name}`, '', {
+      kind: 'portfolio-category',
+      category,
+      renderContent: tab => renderPortfolioCategory(tab, category)
+    });
+    return `opened ${category.name}`;
+  }
+
+  function selectPortfolioEntry(number) {
+    const tab = openTabs[openTabs.length - 1];
+    const entry = tab?.kind === 'portfolio-category'
+      ? tab.category.entries[number - 1]
+      : null;
+    if (!entry) return 'no such portfolio item';
+    return openPortfolioLink(entry);
+  }
+
+  function closePortfolio() {
+    return removeTab('portfolio') ? 'portfolio closed' : 'portfolio already closed';
   }
 
   function activateTab(name) {
@@ -463,17 +620,18 @@
     const [tab] = openTabs.splice(index, 1);
     openTabs.push(tab);
     activeTab = name;
-    writingActive = name === 'writing';
     openTabs.forEach((item, itemIndex) => {
       item.element.style.zIndex = String(itemIndex + 2);
     });
     tab.titleTextElement.textContent = tab.title;
-    tab.contentElement.textContent = tab.content;
+    if (tab.renderContent) tab.renderContent(tab);
+    else tab.contentElement.textContent = tab.content;
   }
 
   function makeDraggable(tab) {
     tab.titleElement.addEventListener('pointerdown', event => {
       if (event.target.closest('button')) return;
+      event.preventDefault();
       activateTab(tab.name);
       const rect = tab.element.getBoundingClientRect();
       const offsetX = event.clientX - rect.left;
@@ -482,6 +640,7 @@
       tab.element.style.top = `${rect.top}px`;
       tab.element.style.right = 'auto';
       tab.element.style.transform = 'none';
+      windowLayer.classList.add('is-dragging');
       const move = moveEvent => {
         const maxLeft = Math.max(0, window.innerWidth - rect.width);
         const maxTop = Math.max(0, window.innerHeight - tab.titleElement.offsetHeight);
@@ -493,13 +652,14 @@
       const stop = () => {
         document.removeEventListener('pointermove', move);
         document.removeEventListener('pointerup', stop);
+        windowLayer.classList.remove('is-dragging');
       };
       document.addEventListener('pointermove', move);
       document.addEventListener('pointerup', stop, { once: true });
     });
   }
 
-  function addTab(name, title, content) {
+  function addTab(name, title, content, { kind = name, renderContent = null, category = null } = {}) {
     const element = document.createElement('section');
     element.className = 'portfolio-window is-opening';
     element.setAttribute('aria-label', title);
@@ -520,14 +680,19 @@
     element.style.right = `${1 + offset}rem`;
     element.style.top = `calc(50% + ${offset}rem)`;
     windowLayer.append(element);
-    const tab = { name, title, content, element, titleElement, titleTextElement, contentElement, timer: 0 };
+    const tab = {
+      name, title, content, kind, element, titleElement, titleTextElement,
+      contentElement, timer: 0, renderContent, category
+    };
     openTabs.push(tab);
     makeDraggable(tab);
     closeButton.addEventListener('click', async event => {
       event.stopPropagation();
       const closedTitle = tab.title;
-      if (tab.name === 'writing') {
+      if (tab.kind === 'writing-menu') {
         await closeWriting();
+      } else if (tab.kind === 'portfolio-menu') {
+        closePortfolio();
       } else {
         removeTab(tab.name);
       }
@@ -539,6 +704,7 @@
       element.classList.remove('is-opening');
       element.classList.add('is-open');
     }, 180);
+    return tab;
   }
 
   function removeTab(name) {
@@ -558,8 +724,31 @@
   async function closeTopTab() {
     if (!openTabs.length) return null;
     const name = openTabs[openTabs.length - 1].name;
-    if (name === 'writing') return closeWriting();
-    return removeTab(name) ? 'portfolio closed' : null;
+    const tab = openTabs[openTabs.length - 1];
+    if (tab.kind === 'writing-menu') return closeWriting();
+    if (tab.kind === 'portfolio-menu') return closePortfolio();
+    return removeTab(name) ? 'tab closed' : null;
+  }
+
+  function closeNamedTab(name) {
+    const target = name.trim().replace(/^['"]|['"]$/g, '').replace(/\.txt$/i, '').toLowerCase();
+    if (!target) return 'usage: close <tab_name>';
+    if (target === 'portfolio') return closePortfolio();
+    if (target === 'writing' || target === 'writings') return closeWriting();
+
+    const tab = openTabs.find(item => {
+      const titleName = item.title.split('\\').pop().replace(/\.txt$/i, '').toLowerCase();
+      const tabName = item.name.toLowerCase();
+      const categoryName = item.category?.name?.toLowerCase();
+      return titleName === target
+        || tabName === target
+        || tabName === `portfolio:${target}`
+        || tabName === `writing:${target}`
+        || categoryName === target;
+    });
+    return tab
+      ? (removeTab(tab.name) ? `${tab.title} closed` : 'tab already closed')
+      : `${name} tab is not open`;
   }
 
   async function loadWritingFiles() {
@@ -573,57 +762,268 @@
   }
 
   async function openWriting() {
-    if (writingActive) return 'writing already opened';
-    writingActive = true;
-    writingSelected = false;
-    addTab('writing', 'C:\\Writing\\', 'Loading writings...');
+    const existing = openTabs.find(tab => tab.kind === 'writing-menu');
+    if (existing) {
+      activateTab(existing.name);
+      return 'writing already opened';
+    }
+    addTab('writing', 'C:\\Writing\\', 'Loading writings...', {
+      kind: 'writing-menu',
+      renderContent: tab => renderWritingMenu(tab)
+    });
     try {
       await loadWritingFiles();
       const tab = openTabs.find(item => item.name === 'writing');
-      tab.content = writingPrompt();
       activateTab('writing');
     } catch (error) {
       console.error(error);
       const tab = openTabs.find(item => item.name === 'writing');
       tab.content = 'Unable to load writings.';
+      tab.renderContent = null;
       activateTab('writing');
     }
     return 'select a writing';
   }
 
   async function closeWriting() {
-    writingActive = false;
-    writingSelected = false;
-    removeTab('writing');
-    return 'writing closed';
+    return removeTab('writing') ? 'writing closed' : 'writing already closed';
   }
 
   async function selectWriting(number) {
     const file = writingFiles[number - 1];
-    if (!file) return closeWriting();
+    if (!file) return 'no such writing';
+    const childName = `writing:${file}`;
+    const existing = openTabs.find(item => item.name === childName);
+    if (existing) {
+      activateTab(childName);
+      return `${file} already opened`;
+    }
     try {
       const response = await fetch(`writings/${file}`);
       if (!response.ok) throw new Error(`Failed to load writings/${file}: ${response.status}`);
-      const tab = openTabs.find(item => item.name === 'writing');
-      tab.title = `C:\\Writing\\${file}`;
-      tab.content = await response.text();
-      activateTab('writing');
-      writingSelected = true;
+      addTab(childName, `C:\\Writing\\${file}`, await response.text(), { kind: 'writing-entry' });
       return `reading ${file}`;
     } catch (error) {
       console.error(error);
-      const tab = openTabs.find(item => item.name === 'writing');
-      tab.title = `C:\\Writing\\${file}`;
-      tab.content = `Unable to load writings\\${file}.`;
-      activateTab('writing');
-      writingSelected = true;
+      addTab(
+        childName,
+        `C:\\Writing\\${file}`,
+        `Unable to load writings\\${file}.`,
+        { kind: 'writing-entry' }
+      );
       return `unable to load ${file}`;
+    }
+  }
+
+  let byteMemory = 0;
+
+  function looksLikeByteExpression(line) {
+    return /^(mem\s*=|mem(?:\s*(?:\+\+|--))?|(?:\+\+|--)\s*mem\b|true\b|false\b|!|\(?\s*[+\-]?\s*\d)/i.test(line)
+      || /\bmem\b|&&|\|\||==|!=|<=|>=|(?<!\b[a-z])[+\-*\/%<>]/i.test(line);
+  }
+
+  function wrapByte(value) {
+    return ((Math.trunc(value) % 256) + 256) % 256;
+  }
+
+  function evaluateByteExpression(expression) {
+    const tokens = [];
+    const pattern = /\s*(>=|<=|==|!=|&&|\|\||\+\+|--|[()+\-*/%=<>!]|(?:0[xX][0-9a-fA-F]+|\d+|true|false|mem))/gy;
+    let position = 0;
+    while (position < expression.length) {
+      pattern.lastIndex = position;
+      const match = pattern.exec(expression);
+      if (!match) return null;
+      tokens.push(match[1]);
+      position = pattern.lastIndex;
+    }
+    if (!tokens.length) return null;
+
+    let index = 0;
+    const peek = () => tokens[index];
+    const take = () => tokens[index++];
+
+    function parsePrimary() {
+      const token = take();
+      if (!token) throw new Error('expected a value');
+      if (/^0[xX][0-9a-fA-F]+$/.test(token) || /^\d+$/.test(token)) {
+        return wrapByte(Number(token));
+      }
+      if (token.toLowerCase() === 'true') return 1;
+      if (token.toLowerCase() === 'false') return 0;
+      if (token.toLowerCase() === 'mem') return byteMemory;
+      if (token === '(') {
+        const value = parseLogicalOr();
+        if (take() !== ')') throw new Error('missing closing parenthesis');
+        return value;
+      }
+      throw new Error(`unknown value: ${token}`);
+    }
+
+    function parsePostfix() {
+      const start = index;
+      let value = parsePrimary();
+      if (peek() === '++') {
+        take();
+        if (tokens[start]?.toLowerCase() === 'mem') {
+          byteMemory = wrapByte(byteMemory + 1);
+        } else {
+          throw new Error('++ requires mem');
+        }
+        return value;
+      }
+      if (peek() === '--') {
+        take();
+        if (tokens[start]?.toLowerCase() === 'mem') {
+          byteMemory = wrapByte(byteMemory - 1);
+        } else {
+          throw new Error('-- requires mem');
+        }
+        return value;
+      }
+      return value;
+    }
+
+    function parseUnary() {
+      const token = peek();
+      if (token === '+' || token === '-') {
+        take();
+        const value = parseUnary();
+        return token === '-' ? wrapByte(-value) : wrapByte(value);
+      }
+      if (token === '!') {
+        take();
+        return parseUnary() === 0 ? 1 : 0;
+      }
+      if (token === '++') {
+        take();
+        if (peek() !== 'mem') throw new Error('++ requires mem');
+        take();
+        byteMemory = wrapByte(byteMemory + 1);
+        return byteMemory;
+      }
+      if (token === '--') {
+        take();
+        if (peek() !== 'mem') throw new Error('-- requires mem');
+        take();
+        byteMemory = wrapByte(byteMemory - 1);
+        return byteMemory;
+      }
+      return parsePostfix();
+    }
+
+    function parseMultiplicative() {
+      let value = parseUnary();
+      while (peek() === '*' || peek() === '/' || peek() === '%') {
+        const operator = take();
+        const right = parseUnary();
+        if ((operator === '/' || operator === '%') && right === 0) {
+          throw new Error('division by zero');
+        }
+        if (operator === '*') value = wrapByte(value * right);
+        if (operator === '/') value = wrapByte(Math.trunc(value / right));
+        if (operator === '%') value = wrapByte(value % right);
+      }
+      return value;
+    }
+
+    function parseAdditive() {
+      let value = parseMultiplicative();
+      while (peek() === '+' || peek() === '-') {
+        const operator = take();
+        const right = parseMultiplicative();
+        value = wrapByte(operator === '+' ? value + right : value - right);
+      }
+      return value;
+    }
+
+    function parseComparison() {
+      let value = parseAdditive();
+      while (['<', '<=', '>', '>=', '==', '!='].includes(peek())) {
+        const operator = take();
+        const right = parseAdditive();
+        if (operator === '<') value = value < right ? 1 : 0;
+        if (operator === '<=') value = value <= right ? 1 : 0;
+        if (operator === '>') value = value > right ? 1 : 0;
+        if (operator === '>=') value = value >= right ? 1 : 0;
+        if (operator === '==') value = value === right ? 1 : 0;
+        if (operator === '!=') value = value !== right ? 1 : 0;
+      }
+      return value;
+    }
+
+    function parseLogicalAnd() {
+      let value = parseComparison();
+      while (peek() === '&&') {
+        take();
+        value = value !== 0 && parseComparison() !== 0 ? 1 : 0;
+      }
+      return value;
+    }
+
+    function parseLogicalOr() {
+      let value = parseLogicalAnd();
+      while (peek() === '||') {
+        take();
+        value = value !== 0 || parseLogicalAnd() !== 0 ? 1 : 0;
+      }
+      return value;
+    }
+
+    try {
+      let value;
+      if (/^mem$/i.test(tokens[0] || '') && tokens[1] === '=') {
+        take();
+        take();
+        value = parseLogicalOr();
+        if (index !== tokens.length) throw new Error('unexpected text');
+        byteMemory = wrapByte(value);
+      } else {
+        value = parseLogicalOr();
+        if (index !== tokens.length) throw new Error('unexpected text');
+      }
+      const isBoolean = tokens.some(token =>
+        ['true', 'false', '==', '!=', '<', '<=', '>', '>=', '&&', '||', '!'].includes(token.toLowerCase())
+      );
+      return { value: wrapByte(value), boolean: isBoolean };
+    } catch (error) {
+      return { error: error.message };
     }
   }
 
   async function runCommand(line) {
     await contentReady;
     if (contentLoadError) return `content unavailable: ${contentLoadError.message}`;
+    const booleanLine = line.trim();
+    if (/^(?:!?\s*(?:true|false))(?:\s*(?:&&|\|\|)\s*!?\s*(?:true|false))*$/i.test(booleanLine)) {
+      const parts = booleanLine.split(/\s*(\&\&|\|\|)\s*/);
+      let result = parts[0].trim().startsWith('!')
+        ? parts[0].trim().slice(1).toLowerCase() !== 'true'
+        : parts[0].trim().toLowerCase() === 'true';
+      for (let i = 1; i < parts.length; i += 2) {
+        const valueText = parts[i + 1].trim();
+        const value = valueText.startsWith('!')
+          ? valueText.slice(1).toLowerCase() !== 'true'
+          : valueText.toLowerCase() === 'true';
+        result = parts[i] === '&&' ? result && value : result || value;
+      }
+      return result ? 'true' : 'false';
+    }
+    const calculation = evaluateByteExpression(line);
+    if (calculation) {
+      if (calculation.error) {
+        if (looksLikeByteExpression(line)) return `math error: ${calculation.error}`;
+      } else {
+        if (/^(mem\s*=|mem\+\+|mem--|\+\+mem|--mem)/i.test(line)) {
+          return `mem = ${byteMemory}`;
+        }
+        if (looksLikeByteExpression(line)) {
+          return calculation.boolean
+            ? (calculation.value ? 'true' : 'false')
+            : String(calculation.value);
+        }
+      }
+    }
     const [name, ...args] = line.trim().split(/\s+/);
     const commandName = name.toLowerCase();
     const aliasedName = commandAliases[commandName] || commandName;
@@ -656,18 +1056,12 @@
           case 'ascii':
           case 'player':
             return closeVideo();
-          case 'writing':
-            return writingActive ? closeWriting() : 'writing already closed';
-          case 'portfolio':
-            return openTabs.some(tab => tab.name === 'portfolio')
-              ? (removeTab('portfolio') ? 'portfolio closed' : 'portfolio already closed')
-              : 'portfolio already closed';
           case 'site':
           case 'tab':
             closeSitePromptActive = true;
             return 'are you sure? (Y/N)';
           default:
-            return 'usage: close [video|writing|portfolio|site|tab]';
+            return closeNamedTab(args.join(' '));
         }
       case 'open': {
         const target = (args[0] || '').toLowerCase();
@@ -695,10 +1089,39 @@
     history.push(line);
     historyIndex = history.length;
     command.value = '';
-    let response;
-    if (writingActive && !writingSelected && /^\d+$/.test(line)) {
+    let response = null;
+    const topTab = openTabs[openTabs.length - 1];
+    const entered = line.toLowerCase();
+    if (topTab?.kind === 'portfolio-menu') {
+      const categoryIndex = portfolioCategories.findIndex(
+        category => category.name.toLowerCase() === entered
+      );
+      response = /^\d+$/.test(line)
+        ? selectPortfolio(Number(line))
+        : categoryIndex >= 0
+          ? selectPortfolio(categoryIndex + 1)
+          : null;
+    } else if (topTab?.kind === 'portfolio-category') {
+      const entryIndex = topTab.category.entries.findIndex(
+        entry => entry.title.toLowerCase() === entered
+      );
+      response = /^\d+$/.test(line)
+        ? selectPortfolioEntry(Number(line))
+        : entryIndex >= 0
+          ? selectPortfolioEntry(entryIndex + 1)
+          : null;
+    } else if (topTab?.kind === 'writing-menu' && /^\d+$/.test(line)) {
       response = await selectWriting(Number(line));
-    } else if (closeSitePromptActive) {
+    } else if (topTab?.kind === 'writing-menu') {
+      const fileIndex = writingFiles.findIndex(file => file.toLowerCase() === entered);
+      response = fileIndex >= 0 ? await selectWriting(fileIndex + 1) : null;
+    }
+    if (response !== null) {
+      printCommand(line, response);
+      updateCursor();
+      return;
+    }
+    if (response === null && closeSitePromptActive) {
       closeSitePromptActive = false;
       const answer = line.toLowerCase();
       if (answer === 'y' || answer === 'yes') {
@@ -710,7 +1133,7 @@
         closeSitePromptActive = true;
         response = 'are you sure? (Y/N)';
       }
-    } else if (openPromptActive || projectPromptActive) {
+    } else if (response === null && (openPromptActive || projectPromptActive)) {
       const selectingProject = projectPromptActive;
       openPromptActive = false;
       projectPromptActive = false;
@@ -726,7 +1149,7 @@
       } else {
         response = openTarget(target);
       }
-    } else {
+    } else if (response === null) {
       response = await runCommand(line);
     }
     printCommand(line, response);

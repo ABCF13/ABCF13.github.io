@@ -1,0 +1,9 @@
+{
+  "categories": [
+    { "name": "Firmware", "file": "firmware.json" },
+    { "name": "Hardware", "file": "hardware.json" },
+    { "name": "Stats", "file": "stats.json" },
+    { "name": "Software", "file": "software.json" },
+    { "name": "Leadership", "file": "leadership.json" }
+  ]
+}

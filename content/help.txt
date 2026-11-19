@@ -8,3 +8,4 @@ Site Commands:
   clear     Clear the terminal
   video     View video commands
   close     Close the highest tab, video, or site/tab
+Artihmetic/logical operators supported
