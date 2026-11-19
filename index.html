@@ -165,7 +165,18 @@
   const openTabs = [];
   let activeTab = '';
 
-  let portfolioCategories = [];
+  let portfolioCategories = [
+    { name: 'Firmware', entries: [] },
+    { name: 'Hardware', entries: [] },
+    { name: 'Stats', entries: [] },
+    { name: 'Software', entries: [] },
+    {
+      name: 'Leadership',
+      entries: [
+        { title: 'NSBE', url: 'https://nsbemcmaster.ca/community-outreach/' }
+      ]
+    }
+  ];
 
   function updateCursor() {
     measure.textContent = command.value.slice(0, command.selectionStart ?? command.value.length);
@@ -371,11 +382,16 @@
   async function readJson(path) {
     const response = await fetch(path);
     if (!response.ok) throw new Error(`Failed to load ${path}: ${response.status}`);
-    return response.json();
+    const text = await response.text();
+    try {
+      return JSON.parse(text);
+    } catch (error) {
+      throw new Error(`Invalid JSON in ${path}: ${error.message}`);
+    }
   }
 
   async function loadSiteContent() {
-    const [about, projects, contact, writing, help, video, welcome, links, portfolio] = await Promise.all([
+    const [about, projects, contact, writing, help, video, welcome, links] = await Promise.all([
       readContent(contentFiles.about),
       readContent(contentFiles.projects),
       readContent(contentFiles.contact),
@@ -383,27 +399,32 @@
       readContent(contentFiles.help),
       readContent(contentFiles.videoHelp),
       readContent(contentFiles.welcome),
-      readJson('content/links.json'),
-      readJson(contentFiles.portfolio)
+      readJson('content/links.json')
     ]);
     Object.assign(info, { about, projects, contact, writing });
     Object.assign(openLinks, links);
     helpText = help;
     videoHelp = video;
     welcomeText = welcome;
-    if (!Array.isArray(portfolio.categories)) throw new Error('Invalid portfolio index');
-    portfolioCategories = await Promise.all(portfolio.categories.map(async category => {
-      if (!category.name || !category.file) throw new Error('Invalid portfolio category');
-      const page = await readJson(`content/portfolio/${category.file}`);
-      if (!Array.isArray(page.entries)) throw new Error(`Invalid portfolio page: ${category.file}`);
-      const entries = page.entries.map(entry => {
-        if (!entry.title || typeof entry.url !== 'string') {
-          throw new Error(`Invalid portfolio entry in ${category.file}`);
-        }
-        return { title: entry.title, url: entry.url };
-      });
-      return { name: page.title || category.name, entries };
-    }));
+    try {
+      const portfolio = await readJson(contentFiles.portfolio);
+      if (!Array.isArray(portfolio.categories)) throw new Error('Invalid portfolio index');
+      portfolioCategories = await Promise.all(portfolio.categories.map(async category => {
+        if (!category.name || !category.file) throw new Error('Invalid portfolio category');
+        const page = await readJson(`content/portfolio/${category.file}`);
+        if (!Array.isArray(page.entries)) throw new Error(`Invalid portfolio page: ${category.file}`);
+        const entries = page.entries.map(entry => {
+          if (!entry.title || typeof entry.url !== 'string') {
+            throw new Error(`Invalid portfolio entry in ${category.file}`);
+          }
+          return { title: entry.title, url: entry.url };
+        });
+        return { name: page.title || category.name, entries };
+      }));
+    } catch (error) {
+      console.error(error);
+      // Keep the built-in menu usable if a JSON file is missing or malformed.
+    }
   }
 
   const contentReady = loadSiteContent().catch(error => {
